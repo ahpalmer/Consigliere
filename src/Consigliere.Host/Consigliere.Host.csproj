@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk.Worker">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UserSecretsId>dotnet-Consigliere.Host-141f7b7f-9bfd-4e1b-979b-27c15113afee</UserSecretsId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Cronos" Version="0.13.0" />
+    <PackageReference Include="Microsoft.Extensions.Hosting" Version="10.0.14" />
+    <PackageReference Include="Telegram.Bot" Version="22.10.3.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Consigliere.Core\Consigliere.Core.csproj" />
+    <ProjectReference Include="..\Consigliere.Llm\Consigliere.Llm.csproj" />
+    <ProjectReference Include="..\Consigliere.Data\Consigliere.Data.csproj" />
+    <ProjectReference Include="..\Consigliere.Skills.Radar\Consigliere.Skills.Radar.csproj" />
+  </ItemGroup>
+</Project>

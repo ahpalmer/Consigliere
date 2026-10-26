@@ -1,0 +1,5 @@
+# ats: greenhouse | lever | ashby
+# board: the token in the public board URL
+sources:
+  - { name: GitLab, ats: greenhouse, board: gitlab }
+  - { name: Linear, ats: ashby, board: linear }

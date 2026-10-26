@@ -1,0 +1,16 @@
+# Example preferences for the fictional sample owner.
+titles:
+  include: [infrastructure, platform, developer tooling]
+  exclude: [intern]
+exclude_locations: [emea, apac]
+deal_breakers: []
+tiers:
+  - name: nearby
+    locations: [denver, boulder]
+    alert: instant
+  - name: remote
+    remote: true
+    alert: daily
+  - name: elsewhere
+    alert: daily
+    min_comp: 200000

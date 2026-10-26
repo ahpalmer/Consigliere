@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Consigliere.Core/Consigliere.Core.csproj" />
+    <Project Path="src/Consigliere.Data/Consigliere.Data.csproj" />
+    <Project Path="src/Consigliere.Host/Consigliere.Host.csproj" />
+    <Project Path="src/Consigliere.Llm/Consigliere.Llm.csproj" />
+    <Project Path="src/Consigliere.Skills.Radar/Consigliere.Skills.Radar.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Consigliere.Tests/Consigliere.Tests.csproj" />
+  </Folder>
+</Solution>
