@@ -1,7 +1,6 @@
 using System.Collections.Concurrent;
 using Anthropic;
 using Anthropic.Models.Beta.Messages;
-using Consigliere.Core.DataPack;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -13,15 +12,11 @@ namespace Consigliere.Llm;
 /// </summary>
 public sealed class ChatService(
     AnthropicClient client,
-    DataPack dataPack,
+    PromptLibrary prompts,
     UsageTracker usage,
     IOptions<LlmOptions> options,
     ILogger<ChatService> logger)
 {
-    private const string DefaultSystemPrompt =
-        "You are Consigliere, a concise personal assistant reached over a chat app. " +
-        "Keep replies short and plain-text friendly for a phone screen.";
-
     private readonly ConcurrentDictionary<long, List<BetaMessageParam>> _histories = new();
     private readonly LlmOptions _options = options.Value;
 
@@ -44,7 +39,7 @@ public sealed class ChatService(
             Fallbacks = new Default(),
             System = new List<BetaTextBlockParam>
             {
-                new() { Text = SystemPrompt(), CacheControl = new BetaCacheControlEphemeral() },
+                new() { Text = prompts.Get("system"), CacheControl = new BetaCacheControlEphemeral() },
             },
             OutputConfig = new BetaOutputConfig { Effort = Effort.Medium },
             Messages = request,
@@ -75,7 +70,4 @@ public sealed class ChatService(
     }
 
     public void Reset(long conversationId) => _histories.TryRemove(conversationId, out _);
-
-    // Read on each call so edits to the private prompt take effect without a restart.
-    private string SystemPrompt() => dataPack.ReadTextOrDefault("prompts/system.md") ?? DefaultSystemPrompt;
 }

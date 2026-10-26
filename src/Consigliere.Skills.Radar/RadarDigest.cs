@@ -56,6 +56,16 @@ public sealed class RadarDigest(
         return new DigestResult(sb.ToString().TrimEnd(), shown.Count, remaining);
     }
 
+    /// <summary>Marks every sent item as unsent, so the next digest starts again from the top.</summary>
+    /// <returns>Number of items put back in the queue.</returns>
+    public async Task<int> ResetAsync(CancellationToken ct)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        return await db.RadarItems
+            .Where(i => i.Passed && i.DuplicateOfId == null && i.DigestedAt != null)
+            .ExecuteUpdateAsync(s => s.SetProperty(i => i.DigestedAt, (DateTimeOffset?)null), ct);
+    }
+
     internal static string FormatComp(decimal? min, decimal? max)
     {
         static string K(decimal v) => "$" + (v / 1000m).ToString("0.#", CultureInfo.InvariantCulture) + "K";

@@ -15,13 +15,14 @@ public sealed class RadarCommands(
     public IReadOnlyList<CommandInfo> Commands { get; } =
     [
         new("/scan", "check all watched sources now"),
-        new("/digest", "show new items that passed the filter"),
+        new("/digest", "show new items that passed the filter; '/digest reset' starts over from the top"),
         new("/sources", "watched sources and their last run"),
     ];
 
     public Task<string> HandleAsync(string command, string args, long chatId, CancellationToken ct) => command switch
     {
         "/scan" => ScanAsync(ct),
+        "/digest" when args.Equals("reset", StringComparison.OrdinalIgnoreCase) => ResetDigestAsync(ct),
         "/digest" => DigestAsync(ct),
         "/sources" => SourcesAsync(ct),
         _ => throw new ArgumentOutOfRangeException(nameof(command), command, null),
@@ -42,6 +43,12 @@ public sealed class RadarCommands(
 
     private async Task<string> DigestAsync(CancellationToken ct) =>
         (await digest.SendableAsync(ct)).Text ?? "Nothing new since the last digest.";
+
+    private async Task<string> ResetDigestAsync(CancellationToken ct)
+    {
+        var count = await digest.ResetAsync(ct);
+        return count == 0 ? "Nothing to reset; no items have been sent yet." : $"Reset {count} item(s). Send /digest to start from the top.";
+    }
 
     private async Task<string> SourcesAsync(CancellationToken ct)
     {

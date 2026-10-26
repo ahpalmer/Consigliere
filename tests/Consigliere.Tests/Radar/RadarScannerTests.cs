@@ -145,6 +145,10 @@ public sealed class RadarScannerTests : IAsyncLifetime
         Assert.True(page1.Text!.IndexOf("Engineer B", StringComparison.Ordinal) < page1.Text.IndexOf("Engineer", page1.Text.IndexOf("— anywhere", StringComparison.Ordinal), StringComparison.Ordinal));
         Assert.Equal((1, 0), (page2.Shown, page2.Remaining));
         Assert.Null(page3.Text);
+
+        Assert.Equal(3, await digest.ResetAsync(CancellationToken.None));
+        var restarted = await digest.SendableAsync(CancellationToken.None);
+        Assert.Equal(page1.Text, restarted.Text);
     }
 
     private static FetchedItem Fake(string id, string title, string company = "Acme", string location = "Raleigh, NC") => new()

@@ -22,8 +22,8 @@ flowchart LR
 
 - **Deterministic first, LLM where judgment is needed.** Polling, dedupe and filtering are plain code.
   Claude does scoring, drafting and conversation, each with its own model in config.
-- **Code is public, data is not.** Profile, prompts and preferences live in a separate private
-  *data pack* (see [docs/data-pack.md](docs/data-pack.md)). This repo ships only a fake sample pack.
+- **Code is public, data is not.** Prompts and settings live here; only genuinely personal data (profile,
+  preferences, the database) lives in a separate private *data pack* (see [docs/data-pack.md](docs/data-pack.md)). This repo ships only a fake sample pack.
 - **Narrow, explicit capabilities.** No shell, browser or general file-write tools. Everything the agent
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
@@ -51,6 +51,7 @@ Anthropic API key.
 cd src/Consigliere.Host
 dotnet user-secrets set "Telegram:BotToken" "<token>"
 dotnet user-secrets set "Anthropic:ApiKey" "<key>"
+dotnet user-secrets set "Agent:OwnerName" "<your name>"
 cd ../..
 dotnet run --project src/Consigliere.Host
 ```

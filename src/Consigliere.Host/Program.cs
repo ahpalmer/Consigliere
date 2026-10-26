@@ -18,11 +18,13 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Services.Configure<DataPackOptions>(o => o.BasePath = builder.Environment.ContentRootPath);
 builder.Services.Configure<DataPackOptions>(builder.Configuration.GetSection(DataPackOptions.Section));
 builder.Services.Configure<LlmOptions>(builder.Configuration.GetSection(LlmOptions.Section));
+builder.Services.Configure<AgentOptions>(builder.Configuration.GetSection(AgentOptions.Section));
 builder.Services.Configure<TelegramOptions>(builder.Configuration.GetSection(TelegramOptions.Section));
 
 builder.Services.AddSingleton<DataPack>();
 builder.Services.AddSingleton<AgentState>();
 builder.Services.AddSingleton<UsageTracker>();
+builder.Services.AddSingleton<PromptLibrary>();
 
 builder.Services.AddSingleton(_ => new AnthropicClient
 {
