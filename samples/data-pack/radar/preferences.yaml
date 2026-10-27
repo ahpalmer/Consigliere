@@ -14,3 +14,9 @@ tiers:
   - name: elsewhere
     alert: daily
     min_comp: 200000
+max_posting_age_days: 90
+categories:
+  - name: tooling
+    description: Developer tooling and infrastructure work.
+  - name: other-engineering
+    description: Any other engineering role.

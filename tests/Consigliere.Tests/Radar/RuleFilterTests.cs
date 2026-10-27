@@ -66,6 +66,15 @@ public sealed class RuleFilterTests
     }
 
     [Fact]
+    public void Unknown_comp_can_be_filed_under_its_own_tier()
+    {
+        var prefs = new Preferences { Tiers = [new Tier { Name = "relocation", MinComp = 250_000, UnknownCompTier = "relocation-no-salary" }] };
+
+        Assert.Equal("relocation-no-salary", RuleFilter.Evaluate(Item(locations: ["Seattle, WA"]), prefs).Tier);
+        Assert.Equal("relocation", RuleFilter.Evaluate(Item(locations: ["Seattle, WA"], compMax: 300_000), prefs).Tier);
+    }
+
+    [Fact]
     public void Comp_floor_does_not_apply_to_local_tier() =>
         Assert.True(RuleFilter.Evaluate(Item(compMax: 120_000), Prefs).Passed);
 

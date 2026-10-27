@@ -1,6 +1,10 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
+    <EmbeddedResource Include="Prompts/*.md" LogicalName="Consigliere.Skills.Radar.Prompts.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Consigliere.Core\Consigliere.Core.csproj" />
     <ProjectReference Include="..\Consigliere.Llm\Consigliere.Llm.csproj" />
     <ProjectReference Include="..\Consigliere.Data\Consigliere.Data.csproj" />

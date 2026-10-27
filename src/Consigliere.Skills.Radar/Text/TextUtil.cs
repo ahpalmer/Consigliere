@@ -72,7 +72,7 @@ public static partial class TextUtil
     [GeneratedRegex(@"\s*\n[\s\n]*")]
     private static partial Regex BlankLines();
 
-    // Amount: "$405,000", "$196,000.00" (cents are dropped), or "$211.4K". Separator: dash, en/em dash, "to", or "and".
-    [GeneratedRegex(@"\$\s?(?<min>\d{1,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])(?:\.\d{2})?\s*(?:USD)?\s*(?:-|–|—|to|and)\s*\$?\s?(?<max>\d{1,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])(?:\.\d{2})?")]
+    // Amount: "$405,000", "$196,000.00" (cents are dropped), or "$211.4K", optionally followed by "/yr". Separator: dash, en/em dash, "to", or "and".
+    [GeneratedRegex(@"\$\s?(?<min>\d{1,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])(?:\.\d{2})?(?:\s*/\s*(?:yr|year))?\s*(?:USD)?\s*(?:-|–|—|to|and)\s*\$?\s?(?<max>\d{1,3}(?:,\d{3})+|\d{2,3}(?:\.\d+)?\s?[kK])(?:\.\d{2})?")]
     private static partial Regex PayRange();
 }

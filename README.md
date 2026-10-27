@@ -7,7 +7,7 @@ handles everything that should be predictable.
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
-    subgraph VM["Azure VM (no inbound ports, SSH over Tailscale)"]
+    subgraph AKS["AKS (single replica, no ingress)"]
         host[Consigliere.Host<br/>Generic Host + scheduler]
         host --> router[MessageRouter<br/>slash commands]
         router --> chat[ChatService<br/>Claude]
@@ -38,6 +38,7 @@ flowchart LR
 | `src/Consigliere.Llm` | Claude client wrapper, per-task model routing, usage tracking |
 | `src/Consigliere.Data` | EF Core + SQLite persistence |
 | `src/Consigliere.Skills.Radar` | Source watching: fetch, normalize, dedupe, filter, score, digest |
+| `src/Consigliere.Skills.Mail` | Read-only alert-email source (Gmail API + LLM extraction) |
 | `src/Consigliere.Host` | Generic Host: DI, Telegram channel, command routing, scheduler |
 | `tests/Consigliere.Tests` | xUnit tests |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
@@ -64,9 +65,12 @@ dotnet user-secrets --project src/Consigliere.Host set "Telegram:AllowedChatIds:
 
 Restart and chat. To use a real data pack, set `DataPack:Path`. Relative paths resolve from `src/Consigliere.Host`, so a sibling pack is `../../../Consigliere-data`.
 
-Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/digest`, `/sources`.
+Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/digest [reset]`,
+`/item <id>`, `/good <id>`, `/bad <id>`, `/sources`.
 
-Radar polls the sources in `radar/watchlist.yaml` hourly and sends a digest at 08:00 (`Radar` and `Scheduler`
+Radar polls the sources in `radar/watchlist.yaml` hourly, scores new items against the owner's profile with a
+cheap model (structured JSON output, cached by content + profile), alerts instantly on strong matches in "instant"
+tiers, and sends a ranked digest at 08:00 (`Radar` and `Scheduler`
 sections in `appsettings.json`). Items go into SQLite at `db/consigliere.db` inside the data pack.
 
 ## Roadmap
@@ -74,8 +78,8 @@ sections in `appsettings.json`). Items go into SQLite at `db/consigliere.db` ins
 - [x] M0: solution skeleton, data-pack boundary, secret hygiene
 - [x] M1: Telegram channel, allowlist, Claude chat, kill switch
 - [x] M2: Radar ingestion (public ATS JSON feeds), SQLite, dedupe, rule filter, scheduler
-- [ ] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
-- [ ] M4: read-only ingestion from a dedicated forwarding inbox
-- [ ] M5: Azure infra in Bicep, GitHub Actions deploy via OIDC + Tailscale, Key Vault, backups
+- [x] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
+- [x] M4: read-only ingestion from a dedicated forwarding inbox ([docs/mail.md](docs/mail.md))
+- [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups
 - [ ] M6: grounded drafting (select-and-reorder only, no invented claims), review queue, tracker
 - [ ] M7: React + TypeScript review dashboard

@@ -36,7 +36,7 @@ public sealed class GreenhouseSource(HttpClient http) : IItemSource
                 CompMin = pay?.Min,
                 CompMax = pay?.Max,
                 CompCurrency = pay is null ? null : "USD",
-                PostedAt = j.FirstPublished ?? j.UpdatedAt,
+                PostedAt = j.FirstPublished, // not updated_at: an edit date is not a posting date
             };
         }).ToList();
 
@@ -50,8 +50,7 @@ public sealed class GreenhouseSource(HttpClient http) : IItemSource
         [property: JsonPropertyName("location")] JobLocation? Location,
         [property: JsonPropertyName("content")] string? Content,
         [property: JsonPropertyName("metadata")] List<Metadata>? Metadata,
-        [property: JsonPropertyName("first_published")] DateTimeOffset? FirstPublished,
-        [property: JsonPropertyName("updated_at")] DateTimeOffset? UpdatedAt);
+        [property: JsonPropertyName("first_published")] DateTimeOffset? FirstPublished);
 
     private sealed record JobLocation([property: JsonPropertyName("name")] string? Name);
 

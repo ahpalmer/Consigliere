@@ -10,6 +10,7 @@ public sealed class LlmOptions
         [LlmTask.Chat] = "claude-opus-5-5",
         [LlmTask.Draft] = "claude-opus-5-5",
         [LlmTask.Score] = "claude-haiku-5-5",
+        [LlmTask.Extract] = "claude-haiku-5-5",
     };
 
     /// <summary>User/assistant turn pairs kept per conversation.</summary>
@@ -24,4 +25,5 @@ public static class LlmTask
     public const string Chat = "chat";
     public const string Draft = "draft";
     public const string Score = "score";
+    public const string Extract = "extract";
 }

@@ -12,6 +12,7 @@ public sealed class TextUtilTests
     [InlineData("the reasonably expected base pay range is between $132,000 and $198,450 for the level", 132_000, 198_450)]
     [InlineData("The base pay range for this role is $196,000.00 - $294,000.00. Actual salary", 196_000, 294_000)]
     [InlineData("Salary Range $250,000.00 - $263,000 USD", 250_000, 263_000)]
+    [InlineData("$160K/yr - $200K/yr · Actively recruiting", 160_000, 200_000)]
     public void Extracts_annual_pay_ranges(string text, int min, int max) =>
         Assert.Equal((min, max), TextUtil.ExtractPayRange(text) is { } r ? ((int)r.Min, (int)r.Max) : default);
 

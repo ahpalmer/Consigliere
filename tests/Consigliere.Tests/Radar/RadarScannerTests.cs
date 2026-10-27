@@ -1,121 +1,94 @@
-using Consigliere.Core.DataPack;
-using Consigliere.Data;
 using Consigliere.Skills.Radar;
-using Consigliere.Skills.Radar.Config;
-using Consigliere.Skills.Radar.Sources;
-using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
+using static Consigliere.Tests.Radar.RadarHarness;
 
 namespace Consigliere.Tests.Radar;
 
-/// <summary>Runs the scanner against a real SQLite file with the real migrations applied.</summary>
-public sealed class RadarScannerTests : IAsyncLifetime
+public sealed class RadarScannerTests
 {
-    private readonly string _pack = Directory.CreateTempSubdirectory("radar-").FullName;
-    private readonly FakeSource _fake = new();
-    private ServiceProvider _services = null!;
-
-    public async Task InitializeAsync()
-    {
-        Directory.CreateDirectory(Path.Combine(_pack, "radar"));
-        await File.WriteAllTextAsync(Path.Combine(_pack, "radar", "watchlist.yaml"),
-            """
-            sources:
-              - name: Acme
-                ats: fake
-                board: acme
-              - name: Globex
-                ats: fake
-                board: globex
-              - name: Initech
-                ats: workday
-                board: initech
-            """);
-        await File.WriteAllTextAsync(Path.Combine(_pack, "radar", "preferences.yaml"),
-            """
-            titles:
-              include: [engineer]
-            tiers:
-              - name: local
-                locations: [raleigh]
-              - name: anywhere
-            """);
-
-        var services = new ServiceCollection()
-            .AddLogging()
-            .AddSingleton(TimeProvider.System)
-            .AddSingleton<IItemSource>(_fake)
-            .AddSingleton(new DataPack(Options.Create(new DataPackOptions { Path = _pack })))
-            .AddConsigliereData(_ => Path.Combine(_pack, "db", "test.db"));
-        services.AddSingleton<RadarConfigLoader>();
-        services.AddSingleton<RadarScanner>();
-        services.AddSingleton<RadarDigest>();
-        services.Configure<RadarOptions>(o => o.DigestMaxItems = 2);
-        _services = services.BuildServiceProvider();
-
-        await using var db = await Db();
-        await db.Database.MigrateAsync();
-    }
-
-    public async Task DisposeAsync()
-    {
-        await _services.DisposeAsync();
-        SqliteConnection.ClearAllPools(); // release the file lock on Windows
-        Directory.Delete(_pack, recursive: true);
-    }
-
-    private Task<ConsigliereDbContext> Db() => _services.GetRequiredService<IDbContextFactory<ConsigliereDbContext>>().CreateDbContextAsync();
-
     [Fact]
     public async Task Second_scan_records_nothing_new()
     {
-        _fake.Items["acme"] = [Fake("1", "Platform Engineer"), Fake("2", "Recruiter")];
-        var scanner = _services.GetRequiredService<RadarScanner>();
+        await using var h = await CreateAsync();
+        h.Source.Items["acme"] = [Item("1", "Platform Engineer"), Item("2", "Recruiter")];
+        var scanner = h.Get<RadarScanner>();
 
         var first = await scanner.ScanAsync(CancellationToken.None);
         var second = await scanner.ScanAsync(CancellationToken.None);
 
-        Assert.Equal(2, first!.New);
-        Assert.Equal(1, first.Passed);
+        Assert.Equal((2, 1), (first!.New, first.Passed));
         Assert.Equal(0, second!.New);
-        await using var db = await Db();
-        Assert.Equal(2, await db.RadarItems.CountAsync());
+        Assert.Equal(2, (await h.ItemsAsync()).Count);
+    }
+
+    [Fact]
+    public async Task Rescan_never_changes_first_seen_or_posted_dates()
+    {
+        await using var h = await CreateAsync();
+        var posted = new DateTimeOffset(2026, 10, 1, 9, 30, 0, TimeSpan.FromHours(-4));
+        h.Source.Items["acme"] = [Item("1", "Engineer", posted: posted)];
+        var scanner = h.Get<RadarScanner>();
+        await scanner.ScanAsync(CancellationToken.None);
+        var firstSeen = h.Time.GetUtcNow();
+
+        // Days later the same posting comes back with an edited description.
+        h.Time.Advance(TimeSpan.FromDays(3));
+        h.Source.Items["acme"] = [Item("1", "Engineer", posted: posted) with { Description = "Edited" }];
+        await scanner.ScanAsync(CancellationToken.None);
+
+        var item = Assert.Single(await h.ItemsAsync());
+        Assert.Equal("Edited", item.Description);
+        Assert.Equal(posted, item.PostedAt);              // the board's date, offset normalized to UTC
+        Assert.Equal(firstSeen, item.FirstSeenAt);        // when we first pulled it
+        Assert.Equal(h.Time.GetUtcNow(), item.LastSeenAt); // updated each time it's still listed
     }
 
     [Fact]
     public async Task Changed_posting_is_refreshed_and_refiltered_until_digested()
     {
-        var scanner = _services.GetRequiredService<RadarScanner>();
-        _fake.Items["acme"] = [Fake("1", "Engineer"), Fake("2", "Engineer II")];
+        await using var h = await CreateAsync();
+        var scanner = h.Get<RadarScanner>();
+        h.Source.Items["acme"] = [Item("1", "Engineer"), Item("2", "Engineer II")];
         await scanner.ScanAsync(CancellationToken.None);
 
         // Digest item 1 only, then both postings change.
-        await using (var db = await Db())
+        await using (var db = await h.DbAsync())
             await db.RadarItems.Where(i => i.ExternalId == "1").ExecuteUpdateAsync(s => s.SetProperty(i => i.DigestedAt, DateTimeOffset.UtcNow));
-        _fake.Items["acme"] = [Fake("1", "Recruiter") with { CompMax = 150_000 }, Fake("2", "Recruiter") with { CompMax = 150_000 }];
+        h.Source.Items["acme"] = [Item("1", "Recruiter") with { CompMax = 150_000 }, Item("2", "Recruiter") with { CompMax = 150_000 }];
         var rescan = await scanner.ScanAsync(CancellationToken.None);
 
         Assert.Equal(0, rescan!.New);
-        await using var after = await Db();
-        var items = await after.RadarItems.OrderBy(i => i.ExternalId).ToListAsync();
+        var items = await h.ItemsAsync();
         Assert.All(items, i => Assert.Equal(150_000m, i.CompMax));
         Assert.True(items[0].Passed);  // already digested: filter result kept
         Assert.False(items[1].Passed); // not yet digested: re-filtered, "Recruiter" fails the title rule
     }
 
     [Fact]
+    public async Task Preference_edits_apply_to_existing_unsent_items_on_next_scan()
+    {
+        await using var h = await CreateAsync();
+        var scanner = h.Get<RadarScanner>();
+        h.Source.Items["acme"] = [Item("1", "Engineer", location: "Austin, TX")];
+        await scanner.ScanAsync(CancellationToken.None);
+        Assert.Equal("anywhere", (await h.ItemsAsync())[0].Tier);
+
+        h.WritePreferences(DefaultPreferences.Replace("locations: [raleigh]", "locations: [raleigh, austin]"));
+        await scanner.ScanAsync(CancellationToken.None);
+
+        Assert.Equal("local", (await h.ItemsAsync())[0].Tier);
+    }
+
+    [Fact]
     public async Task Same_posting_on_two_boards_is_marked_duplicate()
     {
-        _fake.Items["acme"] = [Fake("1", "SRE Engineer", company: "Acme")];
-        _fake.Items["globex"] = [Fake("x9", "sre  engineer", company: "ACME")];
+        await using var h = await CreateAsync();
+        h.Source.Items["acme"] = [Item("1", "SRE Engineer", company: "Acme")];
+        h.Source.Items["globex"] = [Item("x9", "sre  engineer", company: "ACME")];
 
-        await _services.GetRequiredService<RadarScanner>().ScanAsync(CancellationToken.None);
+        await h.Get<RadarScanner>().ScanAsync(CancellationToken.None);
 
-        await using var db = await Db();
-        var items = await db.RadarItems.OrderBy(i => i.Id).ToListAsync();
+        var items = await h.ItemsAsync();
         Assert.Null(items[0].DuplicateOfId);
         Assert.Equal(items[0].Id, items[1].DuplicateOfId);
     }
@@ -123,50 +96,52 @@ public sealed class RadarScannerTests : IAsyncLifetime
     [Fact]
     public async Task Unsupported_source_reports_error_without_failing_scan()
     {
-        var summary = await _services.GetRequiredService<RadarScanner>().ScanAsync(CancellationToken.None);
+        await using var h = await CreateAsync(watchlist: DefaultWatchlist + "\n  - { name: Initech, ats: workday, board: initech }");
+
+        var summary = await h.Get<RadarScanner>().ScanAsync(CancellationToken.None);
 
         Assert.Contains(summary!.Sources, s => s.Name == "Initech" && s.Error!.Contains("unsupported"));
-        await using var db = await Db();
+        await using var db = await h.DbAsync();
         Assert.Equal(3, await db.SourceRuns.CountAsync());
+    }
+}
+
+public sealed class AggregatorDedupeTests
+{
+    private const string Watchlist =
+        """
+        sources:
+          - { name: Acme board, ats: fake, board: acme }
+          - { name: Alerts, ats: fakeagg, board: inbox }
+        """;
+
+    [Fact]
+    public async Task Aggregator_copy_defers_to_existing_primary_item()
+    {
+        await using var h = await RadarHarness.CreateAsync(Watchlist);
+        h.Source.Items["acme"] = [RadarHarness.Item("1", "Platform Engineer", location: "Raleigh, NC")];
+        await h.Get<Consigliere.Skills.Radar.RadarScanner>().ScanAsync(CancellationToken.None);
+
+        h.Aggregator.Items["inbox"] = [RadarHarness.Item("linkedin:9", "Platform  engineer", company: "ACME", location: "Raleigh, NC (Hybrid)")];
+        await h.Get<Consigliere.Skills.Radar.RadarScanner>().ScanAsync(CancellationToken.None);
+
+        var items = await h.ItemsAsync();
+        Assert.Equal(items.Single(i => i.Source == "fake").Id, items.Single(i => i.Source == "fakeagg").DuplicateOfId);
     }
 
     [Fact]
-    public async Task Digest_pages_through_items_and_puts_local_tier_first()
+    public async Task Primary_item_arriving_later_takes_over_from_the_aggregator_copy()
     {
-        _fake.Items["acme"] = [Fake("1", "Engineer A", location: "Austin, TX"), Fake("2", "Engineer B", location: "Raleigh, NC"), Fake("3", "Engineer C", location: "Boise, ID")];
-        await _services.GetRequiredService<RadarScanner>().ScanAsync(CancellationToken.None);
-        var digest = _services.GetRequiredService<RadarDigest>();
+        await using var h = await RadarHarness.CreateAsync(Watchlist);
+        h.Aggregator.Items["inbox"] = [RadarHarness.Item("linkedin:9", "Platform Engineer", location: "Raleigh, NC (Hybrid)")];
+        await h.Get<Consigliere.Skills.Radar.RadarScanner>().ScanAsync(CancellationToken.None);
+        Assert.Null(Assert.Single(await h.ItemsAsync()).DuplicateOfId);
 
-        var page1 = await digest.SendableAsync(CancellationToken.None);
-        var page2 = await digest.SendableAsync(CancellationToken.None);
-        var page3 = await digest.SendableAsync(CancellationToken.None);
+        h.Source.Items["acme"] = [RadarHarness.Item("1", "Platform Engineer", location: "Raleigh, NC")];
+        await h.Get<Consigliere.Skills.Radar.RadarScanner>().ScanAsync(CancellationToken.None);
 
-        Assert.Equal((2, 1), (page1.Shown, page1.Remaining));
-        Assert.True(page1.Text!.IndexOf("Engineer B", StringComparison.Ordinal) < page1.Text.IndexOf("Engineer", page1.Text.IndexOf("— anywhere", StringComparison.Ordinal), StringComparison.Ordinal));
-        Assert.Equal((1, 0), (page2.Shown, page2.Remaining));
-        Assert.Null(page3.Text);
-
-        Assert.Equal(3, await digest.ResetAsync(CancellationToken.None));
-        var restarted = await digest.SendableAsync(CancellationToken.None);
-        Assert.Equal(page1.Text, restarted.Text);
-    }
-
-    private static FetchedItem Fake(string id, string title, string company = "Acme", string location = "Raleigh, NC") => new()
-    {
-        ExternalId = id,
-        Company = company,
-        Title = title,
-        Locations = [location],
-        Url = $"https://example.test/{id}",
-    };
-
-    private sealed class FakeSource : IItemSource
-    {
-        public Dictionary<string, IReadOnlyList<FetchedItem>> Items { get; } = [];
-
-        public string Kind => "fake";
-
-        public Task<IReadOnlyList<FetchedItem>> FetchAsync(WatchedSource source, CancellationToken ct) =>
-            Task.FromResult(Items.TryGetValue(source.Board, out var items) ? items : (IReadOnlyList<FetchedItem>)[]);
+        var items = await h.ItemsAsync();
+        Assert.Null(items.Single(i => i.Source == "fake").DuplicateOfId);
+        Assert.Equal(items.Single(i => i.Source == "fake").Id, items.Single(i => i.Source == "fakeagg").DuplicateOfId);
     }
 }

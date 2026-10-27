@@ -4,6 +4,7 @@
     <Project Path="src/Consigliere.Data/Consigliere.Data.csproj" />
     <Project Path="src/Consigliere.Host/Consigliere.Host.csproj" />
     <Project Path="src/Consigliere.Llm/Consigliere.Llm.csproj" />
+    <Project Path="src/Consigliere.Skills.Mail/Consigliere.Skills.Mail.csproj" />
     <Project Path="src/Consigliere.Skills.Radar/Consigliere.Skills.Radar.csproj" />
   </Folder>
   <Folder Name="/tests/">

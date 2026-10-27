@@ -18,5 +18,6 @@
     <ProjectReference Include="..\Consigliere.Llm\Consigliere.Llm.csproj" />
     <ProjectReference Include="..\Consigliere.Data\Consigliere.Data.csproj" />
     <ProjectReference Include="..\Consigliere.Skills.Radar\Consigliere.Skills.Radar.csproj" />
+    <ProjectReference Include="..\Consigliere.Skills.Mail\Consigliere.Skills.Mail.csproj" />
   </ItemGroup>
 </Project>

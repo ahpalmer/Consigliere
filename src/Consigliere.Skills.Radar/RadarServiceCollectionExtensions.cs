@@ -1,6 +1,8 @@
+using Consigliere.Core.Channels;
 using Consigliere.Core.Commands;
 using Consigliere.Core.Scheduling;
 using Consigliere.Skills.Radar.Config;
+using Consigliere.Skills.Radar.Scoring;
 using Consigliere.Skills.Radar.Sources;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -23,9 +25,16 @@ public static class RadarServiceCollectionExtensions
         services.AddTransient<IItemSource>(sp => sp.GetRequiredService<AshbySource>());
 
         services.AddSingleton<RadarScanner>();
+        services.AddSingleton<RankingFactory>();
+        services.AddSingleton<IItemScorer, ItemScorer>();
+        services.AddSingleton<ScoringRunner>();
+        services.AddSingleton<RadarAlerts>();
         services.AddSingleton<RadarDigest>();
+        services.AddSingleton<RadarFeedback>();
+        services.AddSingleton<ICallbackHandler>(sp => sp.GetRequiredService<RadarFeedback>());
         services.AddSingleton<ICommandHandler, RadarCommands>();
         services.AddSingleton<IScheduledJob, RadarScanJob>();
+        services.AddSingleton<IScheduledJob, RadarScoreJob>();
         services.AddSingleton<IScheduledJob, RadarDigestJob>();
         return services;
     }

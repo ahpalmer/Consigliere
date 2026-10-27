@@ -12,17 +12,25 @@ public sealed class SchedulerOptions
 
     /// <summary>IANA or Windows time zone id that cron expressions are evaluated in.</summary>
     public string TimeZone { get; set; } = "America/New_York";
+
+    /// <summary>
+    /// Optional healthchecks.io ping base, e.g. "https://hc-ping.com/<ping-key>". Each job pings "{base}/{job-name}"
+    /// on success and ".../fail" on failure, so a check per job goes red if that job stops running. Keep it in secrets.
+    /// </summary>
+    public string? HealthchecksPingUrl { get; set; }
 }
 
 /// <summary>
 /// Runs each <see cref="IScheduledJob"/> on its cron schedule inside the host process.
 /// Paused agents skip runs; a job that starts failing alerts the owner once until it recovers.
+/// With healthchecks configured, every run is also reported externally: the dead-man's switch for a dead host.
 /// </summary>
 public sealed class JobScheduler(
     IEnumerable<IScheduledJob> jobs,
     AgentState state,
     IChannel channel,
     IOptions<SchedulerOptions> options,
+    IHttpClientFactory httpFactory,
     TimeProvider time,
     ILogger<JobScheduler> logger) : BackgroundService
 {
@@ -59,15 +67,34 @@ public sealed class JobScheduler(
             try
             {
                 await job.RunAsync(ct);
+                await PingAsync(job.Name, success: true, ct);
                 if (failing) await channel.NotifyOwnerAsync($"✅ {job.Name} recovered.", ct);
                 failing = false;
             }
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 logger.LogError(ex, "Scheduled job {Job} failed", job.Name);
+                await PingAsync(job.Name, success: false, ct);
                 if (!failing) await channel.NotifyOwnerAsync($"⚠ {job.Name} failed: {ex.Message}", ct);
                 failing = true;
             }
+        }
+    }
+
+    private async Task PingAsync(string jobName, bool success, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(options.Value.HealthchecksPingUrl)) return;
+        var url = $"{options.Value.HealthchecksPingUrl.TrimEnd('/')}/{jobName}{(success ? "" : "/fail")}?create=1";
+        try
+        {
+            using var client = httpFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
+            (await client.GetAsync(url, ct)).EnsureSuccessStatusCode();
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            // Monitoring must never break the job itself.
+            logger.LogWarning(ex, "Healthchecks ping for {Job} failed", jobName);
         }
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Reflection;
 using Microsoft.Extensions.Options;
 
 namespace Consigliere.Llm;
@@ -12,21 +13,25 @@ public sealed class AgentOptions
 }
 
 /// <summary>
-/// Prompts ship with the code as embedded resources (src/Consigliere.Llm/Prompts/*.md),
-/// so they're versioned and reviewed like code. Personal details come in through placeholders.
+/// Prompts ship with the code as embedded resources (each project's Prompts/*.md, named
+/// "{AssemblyName}.Prompts.{name}.md"), so they're versioned and reviewed like code. Personal details come in through placeholders.
 /// </summary>
 public sealed class PromptLibrary(IOptions<AgentOptions> options)
 {
     private readonly ConcurrentDictionary<string, string> _cache = new();
 
-    public string Get(string name) =>
-        _cache.GetOrAdd(name, Load).Replace("{{owner}}", options.Value.OwnerName);
-
-    private static string Load(string name)
+    /// <param name="source">Assembly that embeds the prompt; defaults to this one.</param>
+    public string Get(string name, Assembly? source = null)
     {
-        var resource = $"Consigliere.Llm.Prompts.{name}.md";
-        using var stream = typeof(PromptLibrary).Assembly.GetManifestResourceStream(resource)
-            ?? throw new InvalidOperationException($"Prompt '{name}' not found (expected embedded resource {resource}).");
+        var assembly = source ?? typeof(PromptLibrary).Assembly;
+        var resource = $"{assembly.GetName().Name}.Prompts.{name}.md";
+        return _cache.GetOrAdd(resource, r => Load(assembly, r)).Replace("{{owner}}", options.Value.OwnerName);
+    }
+
+    private static string Load(Assembly assembly, string resource)
+    {
+        using var stream = assembly.GetManifestResourceStream(resource)
+            ?? throw new InvalidOperationException($"Prompt not found: expected embedded resource {resource}.");
         using var reader = new StreamReader(stream);
         return reader.ReadToEnd().Trim();
     }

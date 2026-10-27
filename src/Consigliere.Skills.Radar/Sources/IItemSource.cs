@@ -23,6 +23,12 @@ public interface IItemSource
     /// <summary>Matches <see cref="WatchedSource.Ats"/>.</summary>
     string Kind { get; }
 
+    /// <summary>
+    /// Aggregators (alert emails, job sites) report items that usually also exist on a primary source, with less detail.
+    /// Their items defer to a primary item with the same company + title.
+    /// </summary>
+    bool IsAggregator => false;
+
     Task<IReadOnlyList<FetchedItem>> FetchAsync(WatchedSource source, CancellationToken ct);
 }
 

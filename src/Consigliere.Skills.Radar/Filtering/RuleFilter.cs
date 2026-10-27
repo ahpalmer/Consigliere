@@ -41,7 +41,10 @@ public static class RuleFilter
         if (tier.MinComp is { } floor && topOfRange is { } top && top < floor)
             return FilterOutcome.Reject($"comp: {top:N0} below {tier.Name} floor {floor:N0}", tier.Name);
 
-        return new FilterOutcome(true, tier.Name, topOfRange is null && tier.MinComp is not null ? "comp unknown" : null);
+        if (topOfRange is null && tier.MinComp is not null)
+            return new FilterOutcome(true, tier.UnknownCompTier ?? tier.Name, "comp unknown");
+
+        return new FilterOutcome(true, tier.Name, null);
     }
 
     private static bool Matches(Tier tier, IReadOnlyList<string> locations) =>

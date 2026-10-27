@@ -7,12 +7,24 @@ using Consigliere.Host;
 using Consigliere.Host.Scheduling;
 using Consigliere.Host.Telegram;
 using Consigliere.Llm;
+using Consigliere.Skills.Mail;
 using Consigliere.Skills.Radar;
+using System.Reflection;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration.UserSecrets;
 using Microsoft.Extensions.Options;
 using Telegram.Bot;
 
 var builder = Host.CreateApplicationBuilder(args);
+
+// One-time setup commands, e.g. `dotnet run --project src/Consigliere.Host -- auth gmail`.
+if (args is ["auth", "gmail"])
+{
+    var secretsId = typeof(Program).Assembly.GetCustomAttribute<UserSecretsIdAttribute>()!.UserSecretsId;
+    var saved = await GmailAuth.RunAsync(builder.Configuration.GetSection(MailOptions.Section).Get<MailOptions>() ?? new(), secretsId, CancellationToken.None);
+    Console.WriteLine($"Gmail authorized. Refresh token saved to {saved} as Mail:RefreshToken.");
+    return;
+}
 
 // Secrets come from user-secrets locally and Key Vault on the VM; never from appsettings.json.
 builder.Services.Configure<DataPackOptions>(o => o.BasePath = builder.Environment.ContentRootPath);
@@ -38,8 +50,10 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddConsigliereData(sp =>
     sp.GetRequiredService<DataPack>().Resolve(sp.GetRequiredService<IOptions<RadarOptions>>().Value.DatabasePath));
 builder.Services.AddRadar(builder.Configuration);
+builder.Services.AddMail(builder.Configuration);
 
 builder.Services.Configure<SchedulerOptions>(builder.Configuration.GetSection(SchedulerOptions.Section));
+builder.Services.AddHttpClient();
 builder.Services.AddHostedService<JobScheduler>();
 
 builder.Services.AddSingleton<ITelegramBotClient>(sp =>
@@ -48,9 +62,9 @@ builder.Services.AddSingleton<ITelegramBotClient>(sp =>
     if (string.IsNullOrWhiteSpace(token)) throw new InvalidOperationException("Telegram:BotToken is not configured.");
     return new TelegramBotClient(token);
 });
-builder.Services.AddSingleton<TelegramChannel>();
-builder.Services.AddSingleton<IChannel>(sp => sp.GetRequiredService<TelegramChannel>());
-builder.Services.AddHostedService(sp => sp.GetRequiredService<TelegramChannel>());
+builder.Services.AddSingleton<TelegramSender>();
+builder.Services.AddSingleton<IChannel>(sp => sp.GetRequiredService<TelegramSender>());
+builder.Services.AddHostedService<TelegramChannel>();
 
 var host = builder.Build();
 
