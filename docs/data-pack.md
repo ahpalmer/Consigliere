@@ -13,9 +13,9 @@ from `DataPack:Path`.
 
 Everything else, including prompts, lives in this repo:
 
-- **Prompts** are embedded resources in `src/Consigliere.Llm/Prompts/`, versioned and reviewed like code.
-  Personal details come in through placeholders, e.g. `{{owner}}` ← `Agent:OwnerName` (user-secrets / Key Vault).
-- **Settings** (schedules, models, limits) are in `appsettings.json`. Secrets are in user-secrets / Key Vault.
+- **Prompts** are embedded in the binary (`internal/*/prompts/*.md`), versioned and reviewed like code.
+  Personal details come in through placeholders, e.g. `{{owner}}` ← `Agent:OwnerName` (secrets file / Key Vault).
+- **Settings** (schedules, models, limits) are in `config/consigliere.json`. Secrets are in the secrets file / Key Vault.
 
 Why the pack is separate:
 
@@ -23,4 +23,4 @@ Why the pack is separate:
   `.gitignore` also blocks `*.db` and any `data-pack` folder other than `samples/`.
 - **Hot edits.** Pack files are re-read on use, so you can edit preferences without redeploying.
 
-All reads go through `DataPack.Resolve`, which rejects paths that escape the pack root.
+All reads go through `datapack.Pack.Resolve`, which rejects paths that escape the pack root.

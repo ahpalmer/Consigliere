@@ -9,9 +9,9 @@ real inbox ──(filter: from:jobalerts-noreply@linkedin.com → forward)──
 
 ## How it works
 
-- `EmailSource` is a Radar source (`ats: email`). Each scan lists recent messages (`Mail:Query`), skips ones already
+- `mail.Source` is a Radar source (`ats: email`). Each scan lists recent messages (`Mail:Query`), skips ones already
   in `ProcessedMessages`, and ignores senders outside `Mail:AllowedSenderDomains`, so they never reach the LLM.
-- A cheap model extracts listings as structured JSON (`Prompts/extract.md`). Per-sender HTML parsers would break
+- A cheap model extracts listings as structured JSON (`internal/mail/prompts/extract.md`). Per-sender HTML parsers would break
   whenever a template changes; this works across senders.
 - **Guardrail:** a listing is kept only if its URL appears in the email itself. Email text is treated as untrusted data.
 - LinkedIn URLs collapse to `/jobs/view/{id}/`, so the same job from several alerts is one item.
@@ -28,9 +28,9 @@ real inbox ──(filter: from:jobalerts-noreply@linkedin.com → forward)──
    expire after 7 days). Create credentials → OAuth client ID → **Desktop app**.
 3. **Secrets:**
    ```bash
-   dotnet user-secrets --project src/Consigliere.Host set "Mail:ClientId" "<client id>"
-   dotnet user-secrets --project src/Consigliere.Host set "Mail:ClientSecret" "<client secret>"
-   dotnet run --project src/Consigliere.Host -- auth gmail   # browser consent; saves Mail:RefreshToken
+   go run ./cmd/consigliere secrets set "Mail:ClientId" "<client id>"
+   go run ./cmd/consigliere secrets set "Mail:ClientSecret" "<client secret>"
+   go run ./cmd/consigliere auth gmail   # browser consent (loopback + PKCE); saves Mail:RefreshToken
    ```
    Google warns the app is unverified; that's expected for a personal app (Advanced → continue).
 4. **Watchlist:** add `- { name: Alert emails, ats: email, board: gmail }` to `radar/watchlist.yaml`.

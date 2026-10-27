@@ -1,0 +1,45 @@
+{
+  "LogLevel": "info",
+  "DataPack": {
+    "Path": "samples/data-pack"
+  },
+  "Llm": {
+    "Models": {
+      "chat": "claude-opus-5-5",
+      "draft": "claude-opus-5-5",
+      "score": "claude-haiku-5-5",
+      "extract": "claude-haiku-5-5"
+    },
+    "MaxHistoryTurns": 20
+  },
+  "Telegram": {
+    "AllowedChatIds": []
+  },
+  "Radar": {
+    "ScanCron": "0 * * * *",
+    "ScoreCron": "*/15 * * * *",
+    "DigestCron": "0 8 * * *",
+    "DigestMaxItems": 25,
+    "DigestMinScore": 50,
+    "AlertMinScore": 75,
+    "ScoreBatchSize": 200,
+    "ScoreConcurrency": 4,
+    "DatabasePath": "db/consigliere.db"
+  },
+  "Scheduler": {
+    "TimeZone": "America/New_York"
+  },
+  "Mail": {
+    "Query": "newer_than:14d",
+    "MaxMessagesPerScan": 50,
+    "AllowedSenderDomains": [
+      "linkedin.com",
+      "indeed.com",
+      "glassdoor.com",
+      "wellfound.com",
+      "ziprecruiter.com",
+      "dice.com",
+      "builtin.com"
+    ]
+  }
+}

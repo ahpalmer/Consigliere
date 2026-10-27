@@ -1,85 +1,100 @@
 # Consigliere
 
-A personal agent I own end to end, built in C# / .NET 10. It runs as one long-lived process on a small
-Linux VM, talks to me over Telegram, and uses Claude for judgment calls, while deterministic code
-handles everything that should be predictable.
+A personal agent I own end to end, written in Go. It runs as one long-lived process (a single static binary),
+talks to me over Telegram, and uses Claude for judgment calls, while deterministic code handles everything
+that should be predictable.
 
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
     subgraph AKS["AKS (single replica, no ingress)"]
-        host[Consigliere.Host<br/>Generic Host + scheduler]
-        host --> router[MessageRouter<br/>slash commands]
-        router --> chat[ChatService<br/>Claude]
-        host --> radar[Radar skill<br/>sources → filter → score → digest]
+        host[cmd/consigliere<br/>receiver + scheduler]
+        host --> router[router<br/>slash commands]
+        router --> chat[llm.Chat<br/>Claude]
+        host --> radar[radar<br/>sources → filter → score → digest]
         radar --> db[(SQLite)]
     end
-    pack[(Private data pack<br/>profile, prompts, preferences)] -. read-only .-> host
+    pack[(Private data pack<br/>profile, preferences, DB)] -. read-only .-> host
     inbox[(Dedicated inbox<br/>read-only)] -. forwarded alerts .-> radar
 ```
 
 ## Design principles
 
 - **Deterministic first, LLM where judgment is needed.** Polling, dedupe and filtering are plain code.
-  Claude does scoring, drafting and conversation, each with its own model in config.
+  Claude does scoring, extraction, drafting and conversation, each with its own model in config.
 - **Code is public, data is not.** Prompts and settings live here; only genuinely personal data (profile,
-  preferences, the database) lives in a separate private *data pack* (see [docs/data-pack.md](docs/data-pack.md)). This repo ships only a fake sample pack.
+  preferences, the database) lives in a separate private *data pack* (see [docs/data-pack.md](docs/data-pack.md)).
+  This repo ships only a fake sample pack.
 - **Narrow, explicit capabilities.** No shell, browser or general file-write tools. Everything the agent
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
-- **Minimal attack surface.** Telegram uses long-polling, so the VM accepts no inbound connections, and only
-  allowlisted chat IDs are answered. Secrets come from user-secrets locally and Key Vault in Azure.
+- **Minimal attack surface.** Telegram uses long-polling, so the host accepts no inbound connections, and only
+  allowlisted chat IDs are answered. Secrets live in a file outside the repo locally and in Key Vault in Azure.
+- **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to a tiny container), the official
+  Anthropic and Google SDKs, and a ~150-line Telegram Bot API client instead of a framework.
 
 ## Layout
 
 | Path | Purpose |
 |---|---|
-| `src/Consigliere.Core` | Abstractions: channels, data pack, agent state |
-| `src/Consigliere.Llm` | Claude client wrapper, per-task model routing, usage tracking |
-| `src/Consigliere.Data` | EF Core + SQLite persistence |
-| `src/Consigliere.Skills.Radar` | Source watching: fetch, normalize, dedupe, filter, score, digest |
-| `src/Consigliere.Skills.Mail` | Read-only alert-email source (Gmail API + LLM extraction) |
-| `src/Consigliere.Host` | Generic Host: DI, Telegram channel, command routing, scheduler |
-| `tests/Consigliere.Tests` | xUnit tests |
+| `cmd/consigliere` | Entry point and wiring: `run`, `auth gmail`, `secrets set/list` |
+| `internal/config` | Layered settings: `config/consigliere.json` → secrets file → `Section__Key` env vars |
+| `internal/llm` | Claude client: per-task models, structured output, chat with refusal fallback, usage, prompts |
+| `internal/store` | SQLite, embedded migrations, timestamp encoding |
+| `internal/radar` | Source watching: job boards, normalize, dedupe, filter, score, rank, alert, digest |
+| `internal/mail` | Read-only alert-email source (Gmail API + LLM extraction, URL-verified) |
+| `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
+| `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
 
 ## Run locally
 
-Prerequisites: .NET 10 SDK, a Telegram bot token from [@BotFather](https://t.me/BotFather), and an
-Anthropic API key.
+Prerequisites: Go 1.27+, a Telegram bot token from [@BotFather](https://t.me/BotFather), and an Anthropic API key.
+Run commands from the repo root.
 
 ```bash
-cd src/Consigliere.Host
-dotnet user-secrets set "Telegram:BotToken" "<token>"
-dotnet user-secrets set "Anthropic:ApiKey" "<key>"
-dotnet user-secrets set "Agent:OwnerName" "<your name>"
-cd ../..
-dotnet run --project src/Consigliere.Host
+go run ./cmd/consigliere secrets set "Telegram:BotToken" "<token>"
+go run ./cmd/consigliere secrets set "Anthropic:ApiKey" "<key>"
+go run ./cmd/consigliere secrets set "Agent:OwnerName" "<your name>"
+go run ./cmd/consigliere
 ```
 
-Send the bot a message. The log prints `Ignoring message from non-allowlisted chat <id>`. Allowlist that ID:
+Secrets go to `<user config dir>/Consigliere/secrets.json` (override with `--secrets` or `CONSIGLIERE_SECRETS`);
+`secrets list` shows which are set without printing values. Environment variables like `Telegram__BotToken`
+override everything, which is how the container gets them.
+
+Send the bot a message. The log prints `ignoring update from non-allowlisted chat chat_id=<id>`. Allowlist it:
 
 ```bash
-dotnet user-secrets --project src/Consigliere.Host set "Telegram:AllowedChatIds:0" "<id>"
+go run ./cmd/consigliere secrets set "Telegram:AllowedChatIds:0" "<id>"
 ```
 
-Restart and chat. To use a real data pack, set `DataPack:Path`. Relative paths resolve from `src/Consigliere.Host`, so a sibling pack is `../../../Consigliere-data`.
+Restart and chat. To use a real data pack, set `DataPack:Path` (relative to the repo root, e.g. `../Consigliere-data`).
 
 Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/digest [reset]`,
 `/item <id>`, `/good <id>`, `/bad <id>`, `/sources`.
 
 Radar polls the sources in `radar/watchlist.yaml` hourly, scores new items against the owner's profile with a
-cheap model (structured JSON output, cached by content + profile), alerts instantly on strong matches in "instant"
-tiers, and sends a ranked digest at 08:00 (`Radar` and `Scheduler`
-sections in `appsettings.json`). Items go into SQLite at `db/consigliere.db` inside the data pack.
+cheap model (structured JSON output, cached by content + profile), alerts instantly on strong matches, and sends a
+ranked digest at 08:00 (`Radar` and `Scheduler` sections in `config/consigliere.json`). Items go into SQLite at
+`db/consigliere.db` inside the data pack.
+
+## Develop
+
+```bash
+go test ./...        # unit + pipeline tests against real SQLite and recorded board responses
+go vet ./...
+gofmt -l .
+```
 
 ## Roadmap
 
-- [x] M0: solution skeleton, data-pack boundary, secret hygiene
+- [x] M0: skeleton, data-pack boundary, secret hygiene
 - [x] M1: Telegram channel, allowlist, Claude chat, kill switch
 - [x] M2: Radar ingestion (public ATS JSON feeds), SQLite, dedupe, rule filter, scheduler
 - [x] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
 - [x] M4: read-only ingestion from a dedicated forwarding inbox ([docs/mail.md](docs/mail.md))
 - [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups
-- [ ] M6: grounded drafting (select-and-reorder only, no invented claims), review queue, tracker
-- [ ] M7: React + TypeScript review dashboard
+- [ ] M6: pipeline (options → active → waiting → completed) and apply kit
+- [ ] M7: application updates from email
+- [ ] M8: React + TypeScript dashboard
