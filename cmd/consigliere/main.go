@@ -99,6 +99,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 
 	clk := clock.Real{}
 	state := agent.NewState(clk.Now())
+	tasks := agent.NewTasks(ctx)
 	usage := llm.NewUsageTracker()
 	llmClient := llm.NewClient(cfg.Anthropic.ApiKey, cfg.Llm, usage)
 	tg := telegram.NewAPI(cfg.Telegram.BotToken)
@@ -112,18 +113,19 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		return err
 	}
 	fetcher := radar.NewHTTPFetcher()
-	scanner := &radar.Scanner{DB: db, Config: radarCfg, Clock: clk, Sources: []radar.Source{
+	scanner := &radar.Scanner{DB: db, Config: radarCfg, Clock: clk, FetchConcurrency: 6, Sources: []radar.Source{
 		radar.Greenhouse{HTTP: fetcher}, radar.Lever{HTTP: fetcher}, radar.Ashby{HTTP: fetcher},
 		&mail.Source{DB: db, Mailbox: mail.NewGmail(cfg.Mail), Extractor: mail.LLMExtractor{LLM: llmClient}, Clock: clk,
 			Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains},
 	}}
 	alerts := &radar.Alerts{DB: db, Ranking: ranking, Channel: sender, Clock: clk, MinScore: cfg.Radar.AlertMinScore}
-	scoring := &radar.ScoringRunner{DB: db, Ranking: ranking, Alerts: alerts, State: state, Clock: clk,
+	scoring := &radar.ScoringRunner{DB: db, Ranking: ranking, Alerts: alerts, State: state, Clock: clk, Tasks: tasks,
 		BatchSize: cfg.Radar.ScoreBatchSize, Concurrency: cfg.Radar.ScoreConcurrency,
 		Scorer: radar.LLMScorer{LLM: llmClient, Model: scoreModel, Owner: cfg.Agent.OwnerName, Pack: pack, Config: radarCfg, Clock: clk}}
 	digest := &radar.Digest{DB: db, Ranking: ranking, Clock: clk, MaxItems: cfg.Radar.DigestMaxItems, MinScore: cfg.Radar.DigestMinScore}
 	feedback := &radar.Feedback{DB: db, Clock: clk}
-	radarCommands := &radar.Commands{DB: db, Scanner: scanner, Scoring: scoring, Digest: digest, Feedback: feedback, Config: radarCfg, Clock: clk}
+	radarCommands := &radar.Commands{DB: db, Scanner: scanner, Scoring: scoring, Digest: digest, Feedback: feedback, Config: radarCfg, Clock: clk,
+		Tasks: tasks, Channel: sender}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
 	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands),
@@ -135,16 +137,41 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 			&radar.DigestJob{Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
 		}}
 
+	// Run until Ctrl+C / SIGTERM, then stop in order: polling and scheduling first, then background work, and only
+	// then (deferred) close the database, so nothing writes to a closed DB.
+	runCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	errs := make(chan error, 2)
-	go func() { errs <- receiver.Run(ctx) }()
-	go func() { errs <- sched.Run(ctx) }()
+	go func() { errs <- receiver.Run(runCtx) }()
+	go func() { errs <- sched.Run(runCtx) }()
+
+	var firstErr error
 	select {
 	case <-ctx.Done():
 		slog.Info("shutting down")
-		return nil
-	case err := <-errs:
-		return err
+	case firstErr = <-errs:
 	}
+	cancel()
+	deadline := time.After(15 * time.Second)
+	for remaining := 2 - boolToInt(firstErr != nil); remaining > 0; remaining-- {
+		select {
+		case <-errs:
+		case <-deadline:
+			slog.Warn("timed out waiting for shutdown")
+			remaining = 0
+		}
+	}
+	if !tasks.Wait(10 * time.Second) {
+		slog.Warn("background work still running at exit")
+	}
+	return firstErr
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 func authGmail(ctx context.Context, configPath, secretsPath string) error {

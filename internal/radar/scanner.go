@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/store"
@@ -41,9 +42,17 @@ type Scanner struct {
 	Sources []Source
 	Config  ConfigLoader
 	Clock   clock.Clock
+	// FetchConcurrency is how many sources download at once.
+	FetchConcurrency int
 
 	mu      sync.Mutex
 	running bool
+}
+
+func (s *Scanner) IsRunning() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
 }
 
 // Scan returns ok=false when a scan is already running.
@@ -74,36 +83,68 @@ func (s *Scanner) Scan(ctx context.Context) (ScanSummary, bool, error) {
 		}
 	}
 
-	var summary ScanSummary
-	for _, watched := range watchlist.Sources {
-		if ctx.Err() != nil {
-			return summary, true, ctx.Err()
+	// Fetch in parallel: some boards (Lever especially) take 1-20s to respond, so a sequential scan takes the sum of
+	// every board's latency. Persist in watchlist order afterwards, since SQLite writes serialize anyway.
+	fetches := make([]fetchResult, len(watchlist.Sources))
+	sem := make(chan struct{}, max(s.FetchConcurrency, 1))
+	var wg sync.WaitGroup
+	for i, watched := range watchlist.Sources {
+		src, ok := byKind[strings.ToLower(watched.Ats)]
+		if !ok {
+			fetches[i] = fetchResult{started: s.Clock.Now(), err: errors.New("unsupported source '" + watched.Ats + "'")}
+			continue
 		}
-		summary.Sources = append(summary.Sources, s.scanSource(ctx, watched, byKind, aggregators, prefs))
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			sem <- struct{}{}
+			defer func() { <-sem }()
+			started := s.Clock.Now()
+			items, err := src.Fetch(ctx, watched)
+			fetches[i] = fetchResult{src: src, items: items, started: started, err: err}
+		}()
+	}
+	wg.Wait()
+
+	var summary ScanSummary
+	for i, watched := range watchlist.Sources {
+		if ctx.Err() != nil {
+			return summary, true, ctx.Err() // shutting down: don't record half a scan
+		}
+		summary.Sources = append(summary.Sources, s.persistSource(ctx, watched, fetches[i], aggregators, prefs))
 	}
 	return summary, true, nil
 }
 
-func (s *Scanner) scanSource(ctx context.Context, watched WatchedSource, byKind map[string]Source, aggregators []string, prefs Preferences) SourceResult {
-	started := s.Clock.Now()
+type fetchResult struct {
+	src     Source
+	items   []FetchedItem
+	started time.Time
+	err     error
+}
+
+func (s *Scanner) persistSource(ctx context.Context, watched WatchedSource, f fetchResult, aggregators []string, prefs Preferences) SourceResult {
 	result := SourceResult{Name: watched.Name, Kind: watched.Ats}
-	if src, ok := byKind[strings.ToLower(watched.Ats)]; !ok {
-		result.Error = "unsupported source '" + watched.Ats + "'"
-	} else {
-		result.Kind = src.Kind()
-		items, err := src.Fetch(ctx, watched)
+	err := f.err
+	if f.src != nil {
+		result.Kind = f.src.Kind()
 		if err == nil {
-			result, err = s.persist(ctx, src, watched, items, aggregators, prefs)
-		}
-		if err != nil && !errors.Is(err, context.Canceled) {
-			slog.Warn("scan failed", "source", watched.Name, "kind", watched.Ats, "board", watched.Board, "err", err)
-			result = SourceResult{Name: watched.Name, Kind: src.Kind(), Error: err.Error()}
+			result, err = s.persist(ctx, f.src, watched, f.items, aggregators, prefs)
 		}
 	}
+	if err != nil {
+		if f.src != nil && !errors.Is(err, context.Canceled) {
+			slog.Warn("scan failed", "source", watched.Name, "kind", watched.Ats, "board", watched.Board, "err", err)
+		}
+		result = SourceResult{Name: watched.Name, Kind: result.Kind, Error: err.Error()}
+	}
+	if ctx.Err() != nil {
+		return result
+	}
 
-	_, err := s.DB.ExecContext(ctx, `INSERT INTO "SourceRuns" ("Source", "Board", "StartedAt", "FinishedAt", "Fetched", "New", "Passed", "Error")
+	_, err = s.DB.ExecContext(ctx, `INSERT INTO "SourceRuns" ("Source", "Board", "StartedAt", "FinishedAt", "Fetched", "New", "Passed", "Error")
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		result.Kind, watched.Board, store.FormatTime(started), store.FormatTime(s.Clock.Now()), result.Fetched, result.New, result.Passed, nullString(result.Error))
+		result.Kind, watched.Board, store.FormatTime(f.started), store.FormatTime(s.Clock.Now()), result.Fetched, result.New, result.Passed, nullString(result.Error))
 	if err != nil {
 		slog.Warn("recording source run failed", "source", watched.Name, "err", err)
 	}

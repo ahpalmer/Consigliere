@@ -27,7 +27,9 @@ func Open(ctx context.Context, path string) (*sql.DB, error) {
 		return nil, err
 	}
 	// WAL + busy timeout: the scheduler, chat commands, and background scoring all touch the DB concurrently.
-	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+	// Transactions take the write lock up front (_txlock=immediate): a deferred one that reads, then writes after
+	// another connection committed fails at once with SQLITE_BUSY_SNAPSHOT (517) instead of waiting.
+	dsn := "file:" + filepath.ToSlash(path) + "?_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_txlock=immediate"
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err

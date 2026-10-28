@@ -30,6 +30,7 @@ type ScoringRunner struct {
 	Clock       clock.Clock
 	BatchSize   int
 	Concurrency int
+	Tasks       *agent.Tasks
 
 	running atomic.Bool
 }
@@ -53,12 +54,12 @@ func (r *ScoringRunner) CountPending(ctx context.Context) (int, error) {
 }
 
 // RunInBackground is fire-and-forget for chat commands, so Telegram isn't blocked while a batch scores.
+// It runs under the app's lifetime (Tasks), so shutdown cancels it and waits before closing the database.
 func (r *ScoringRunner) RunInBackground() {
-	go func() {
-		if _, _, err := r.Run(context.Background()); err != nil {
-			slog.Error("background scoring failed", "err", err)
-		}
-	}()
+	r.Tasks.Go("scoring", func(ctx context.Context) error {
+		_, _, err := r.Run(ctx)
+		return err
+	})
 }
 
 // Run returns ok=false when a run is already in progress.

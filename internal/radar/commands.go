@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/ahpalmer/consigliere/internal/agent"
+	"github.com/ahpalmer/consigliere/internal/channel"
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/commands"
 	"github.com/ahpalmer/consigliere/internal/store"
@@ -22,6 +24,8 @@ type Commands struct {
 	Feedback *Feedback
 	Config   ConfigLoader
 	Clock    clock.Clock
+	Tasks    *agent.Tasks
+	Channel  channel.Channel
 }
 
 func (c *Commands) Commands() []commands.Info {
@@ -67,16 +71,39 @@ func (c *Commands) Handle(ctx context.Context, command, args string, _ int64) (s
 	return "", fmt.Errorf("unknown command %s", command)
 }
 
-func (c *Commands) scan(ctx context.Context) (string, error) {
+// scan replies right away and reports back when done: some boards take 20s+ to respond, and the bot should stay
+// responsive meanwhile.
+func (c *Commands) scan(_ context.Context) (string, error) {
+	if c.Scanner.IsRunning() {
+		return "A scan is already running.", nil
+	}
+	watchlist, err := c.Config.Watchlist()
+	if err != nil {
+		return "", err
+	}
+	if len(watchlist.Sources) == 0 {
+		return "Nothing to scan. Add sources to " + WatchlistPath + " in the data pack.", nil
+	}
+	c.Tasks.Go("scan", func(ctx context.Context) error {
+		report, err := c.scanReport(ctx)
+		if err != nil {
+			report = "⚠ Scan failed: " + err.Error()
+		}
+		if ctx.Err() != nil {
+			return nil
+		}
+		return c.Channel.Notify(ctx, report)
+	})
+	return fmt.Sprintf("Scanning %d source(s). I'll send the results when it's done.", len(watchlist.Sources)), nil
+}
+
+func (c *Commands) scanReport(ctx context.Context) (string, error) {
 	summary, ok, err := c.Scanner.Scan(ctx)
 	if !ok {
 		return "A scan is already running.", nil
 	}
 	if err != nil {
 		return "", err
-	}
-	if len(summary.Sources) == 0 {
-		return "Nothing to scan. Add sources to " + WatchlistPath + " in the data pack.", nil
 	}
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Scanned %d source(s): %d new, %d passed the filter.\n", len(summary.Sources), summary.New(), summary.Passed())

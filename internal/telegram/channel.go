@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"slices"
+	"sync"
 	"time"
 	"unicode/utf8"
 
@@ -92,6 +93,11 @@ func (r *Receiver) Run(ctx context.Context) error {
 	}
 	slog.Info("telegram connected", "bot", "@"+me.Username, "allowed_chats", len(r.Allowed))
 
+	// Each update is handled on its own goroutine, so one slow command doesn't freeze the chat.
+	// Run waits for in-flight handlers before returning, so shutdown doesn't close resources under them.
+	var inflight sync.WaitGroup
+	defer inflight.Wait()
+
 	var offset int64
 	for ctx.Err() == nil {
 		updates, err := r.API.GetUpdates(ctx, offset, 50)
@@ -108,12 +114,16 @@ func (r *Receiver) Run(ctx context.Context) error {
 		}
 		for _, u := range updates {
 			offset = u.UpdateID + 1
-			switch {
-			case u.Message != nil:
-				r.handleMessage(ctx, *u.Message)
-			case u.CallbackQuery != nil:
-				r.handleCallback(ctx, *u.CallbackQuery)
-			}
+			inflight.Add(1)
+			go func() {
+				defer inflight.Done()
+				switch {
+				case u.Message != nil:
+					r.handleMessage(ctx, *u.Message)
+				case u.CallbackQuery != nil:
+					r.handleCallback(ctx, *u.CallbackQuery)
+				}
+			}()
 		}
 	}
 	return nil
@@ -140,6 +150,9 @@ func (r *Receiver) handleMessage(ctx context.Context, m Message) {
 	}
 	_ = r.API.SendChatAction(ctx, m.Chat.ID, "typing")
 	reply, err := r.Router.Handle(ctx, m.Chat.ID, m.Text)
+	if ctx.Err() != nil {
+		return // shutting down; the reply can't be sent anyway
+	}
 	if err != nil {
 		slog.Error("failed handling message", "chat_id", m.Chat.ID, "err", err)
 		reply = "Something broke: " + err.Error()
