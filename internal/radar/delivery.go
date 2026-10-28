@@ -20,6 +20,8 @@ type Alerts struct {
 	Channel  channel.Channel
 	Clock    clock.Clock
 	MinScore int
+	// Buttons under each alert; nil means the 👍/👎 feedback buttons.
+	Buttons func(itemID int64) []channel.Button
 }
 
 func (a *Alerts) Send(ctx context.Context) (int, error) {
@@ -55,7 +57,11 @@ func (a *Alerts) Send(ctx context.Context) (int, error) {
 		if ranking.PriorityOf(item) == PriorityHigh {
 			marker = "★ "
 		}
-		if err := a.Channel.Notify(ctx, marker+Detail(item, now), FeedbackButtons(item.ID)...); err != nil {
+		buttons := FeedbackButtons(item.ID)
+		if a.Buttons != nil {
+			buttons = a.Buttons(item.ID)
+		}
+		if err := a.Channel.Notify(ctx, marker+Detail(item, now), buttons...); err != nil {
 			return 0, err
 		}
 		// Alerted items count as digested so they don't show up again in the next digest.
@@ -131,12 +137,12 @@ func (d *Digest) Next(ctx context.Context) (DigestResult, error) {
 	}
 	sb.WriteString("\n")
 	if remaining > 0 {
-		fmt.Fprintf(&sb, "%d more — send /digest again.\n", remaining)
+		fmt.Fprintf(&sb, "%d more — send /options again.\n", remaining)
 	}
 	if awaiting > 0 {
 		fmt.Fprintf(&sb, "%d still being scored.\n", awaiting)
 	}
-	sb.WriteString("/item <id> for details · /good or /bad <id> to rate")
+	sb.WriteString("/item <id> for details · /activate <id> to go after one · /good or /bad <id> to rate")
 
 	ids := make([]any, len(shown))
 	for i, item := range shown {

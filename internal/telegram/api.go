@@ -6,7 +6,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"mime/multipart"
 	"net/http"
+	"strconv"
 	"time"
 )
 
@@ -61,11 +63,15 @@ func (a *API) call(ctx context.Context, method string, params, result any) error
 	if err != nil {
 		return err
 	}
+	return a.post(ctx, method, "application/json", body, result)
+}
+
+func (a *API) post(ctx context.Context, method, contentType string, body []byte, result any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fmt.Sprintf("%s/bot%s/%s", a.base, a.token, method), bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Content-Type", contentType)
 	resp, err := a.http.Do(req)
 	if err != nil {
 		// The URL contains the bot token; never let it into logs.
@@ -101,12 +107,49 @@ func (a *API) GetUpdates(ctx context.Context, offset int64, timeoutSeconds int) 
 	}, &updates)
 }
 
-func (a *API) SendMessage(ctx context.Context, chatID int64, text string, buttons []InlineButton) error {
+func (a *API) SendMessage(ctx context.Context, chatID int64, text string, keyboard [][]InlineButton) error {
 	params := map[string]any{"chat_id": chatID, "text": text, "link_preview_options": map[string]any{"is_disabled": true}}
-	if len(buttons) > 0 {
-		params["reply_markup"] = map[string]any{"inline_keyboard": [][]InlineButton{buttons}}
+	if len(keyboard) > 0 {
+		params["reply_markup"] = map[string]any{"inline_keyboard": keyboard}
 	}
 	return a.call(ctx, "sendMessage", params, nil)
+}
+
+// EditMessageText replaces a message's text and buttons (an empty keyboard removes them).
+func (a *API) EditMessageText(ctx context.Context, chatID, messageID int64, text string, keyboard [][]InlineButton) error {
+	if keyboard == nil {
+		keyboard = [][]InlineButton{}
+	}
+	return a.call(ctx, "editMessageText", map[string]any{
+		"chat_id": chatID, "message_id": messageID, "text": text,
+		"link_preview_options": map[string]any{"is_disabled": true},
+		"reply_markup":         map[string]any{"inline_keyboard": keyboard},
+	}, nil)
+}
+
+// SendDocument uploads a file (multipart/form-data, as the Bot API requires for uploads).
+func (a *API) SendDocument(ctx context.Context, chatID int64, name string, data []byte, caption string) error {
+	var body bytes.Buffer
+	w := multipart.NewWriter(&body)
+	if err := w.WriteField("chat_id", strconv.FormatInt(chatID, 10)); err != nil {
+		return err
+	}
+	if caption != "" {
+		if err := w.WriteField("caption", caption); err != nil {
+			return err
+		}
+	}
+	part, err := w.CreateFormFile("document", name)
+	if err != nil {
+		return err
+	}
+	if _, err := part.Write(data); err != nil {
+		return err
+	}
+	if err := w.Close(); err != nil {
+		return err
+	}
+	return a.post(ctx, "sendDocument", w.FormDataContentType(), body.Bytes(), nil)
 }
 
 func (a *API) SendChatAction(ctx context.Context, chatID int64, action string) error {

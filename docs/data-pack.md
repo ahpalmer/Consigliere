@@ -6,10 +6,22 @@ from `DataPack:Path`.
 
 ```
 <data-pack>/
-  profile/    long-form background, tagged bullet bank, wins log, story bank
+  profile/    who the owner is (see below)
   radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll)
   db/         SQLite database (gitignored in the pack; backed up to blob storage)
 ```
+
+| `profile/` file | Used by | What it is |
+|---|---|---|
+| `summary.md`, `resume.master.md` | scoring, kit, prep | Short summary and the full resume as text |
+| `bullets.yaml` | `/kit` | The resume as data: header, skills, sections with min/max, tagged bullets by id. The kit picks and orders bullets; it never writes new ones. `draft: true` bullets are never used. |
+| `stories.md` | `/prep` | STAR stories with themes |
+| `wins.md` | the owner | Raw log of wins; source material for bullets and stories |
+| `networks.yaml` | `/kit` | Veteran groups per company, plus general programs |
+| `connections.csv` | `/kit` | LinkedIn's Connections export, unmodified. Read locally to list people you know at a company; never sent to the model. |
+
+Scoring reads only `summary.md` and `resume.master.md` (or `about.md`), so editing stories or the bullet bank
+doesn't make every score stale.
 
 Everything else, including prompts, lives in this repo:
 

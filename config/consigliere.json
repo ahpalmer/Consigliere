@@ -23,8 +23,13 @@
     "DigestMinScore": 50,
     "AlertMinScore": 75,
     "ScoreBatchSize": 200,
-    "ScoreConcurrency": 4,
+    "ScoreConcurrency": 8,
     "DatabasePath": "db/consigliere.db"
+  },
+  "Pipeline": {
+    "ActiveSoftCap": 10,
+    "FollowUpDays": 7,
+    "GhostDays": 30
   },
   "Scheduler": {
     "TimeZone": "America/New_York"
@@ -39,7 +44,8 @@
       "wellfound.com",
       "ziprecruiter.com",
       "dice.com",
-      "builtin.com"
+      "builtin.com",
+      "levels.fyi"
     ]
   }
 }

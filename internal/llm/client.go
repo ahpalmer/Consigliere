@@ -42,6 +42,17 @@ type StructuredRequest struct {
 	User      string
 	Schema    map[string]any
 	MaxTokens int64
+	// Effort is low by default (cheap bulk calls); raise it for judgment-heavy drafting.
+	Effort Effort
+}
+
+// GenerateRequest asks for plain text (drafts, prep notes).
+type GenerateRequest struct {
+	Task      string
+	System    []SystemBlock
+	User      string
+	MaxTokens int64
+	Effort    Effort
 }
 
 type SystemBlock struct {
@@ -49,33 +60,54 @@ type SystemBlock struct {
 	Cache bool
 }
 
+type Effort string
+
+const (
+	EffortLow    Effort = "low"
+	EffortMedium Effort = "medium"
+	EffortHigh   Effort = "high"
+)
+
 // Structured returns the model's JSON text. ErrRefused if the model declined.
 func (c *Client) Structured(ctx context.Context, req StructuredRequest) (string, error) {
-	model, err := c.cfg.ModelFor(req.Task)
+	return c.complete(ctx, req.Task, req.System, req.User, req.MaxTokens, req.Effort, req.Schema)
+}
+
+// Generate returns the model's text reply. ErrRefused if the model declined.
+func (c *Client) Generate(ctx context.Context, req GenerateRequest) (string, error) {
+	text, err := c.complete(ctx, req.Task, req.System, req.User, req.MaxTokens, req.Effort, nil)
+	return strings.TrimSpace(text), err
+}
+
+func (c *Client) complete(ctx context.Context, task string, systemBlocks []SystemBlock, user string, maxTokens int64, effort Effort, schema map[string]any) (string, error) {
+	model, err := c.cfg.ModelFor(task)
 	if err != nil {
 		return "", err
 	}
-	system := make([]anthropic.TextBlockParam, 0, len(req.System))
-	for _, b := range req.System {
+	system := make([]anthropic.TextBlockParam, 0, len(systemBlocks))
+	for _, b := range systemBlocks {
 		block := anthropic.TextBlockParam{Text: b.Text}
 		if b.Cache {
 			block.CacheControl = anthropic.NewCacheControlEphemeralParam()
 		}
 		system = append(system, block)
 	}
-	maxTokens := req.MaxTokens
 	if maxTokens == 0 {
 		maxTokens = 8000
 	}
+	if effort == "" {
+		effort = EffortLow
+	}
+	output := anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffort(effort)}
+	if schema != nil {
+		output.Format = anthropic.JSONOutputFormatParam{Schema: schema}
+	}
 	resp, err := c.api.Messages.New(ctx, anthropic.MessageNewParams{
-		Model:     model,
-		MaxTokens: maxTokens,
-		System:    system,
-		OutputConfig: anthropic.OutputConfigParam{
-			Effort: anthropic.OutputConfigEffortLow,
-			Format: anthropic.JSONOutputFormatParam{Schema: req.Schema},
-		},
-		Messages: []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(req.User))},
+		Model:        model,
+		MaxTokens:    maxTokens,
+		System:       system,
+		OutputConfig: output,
+		Messages:     []anthropic.MessageParam{anthropic.NewUserMessage(anthropic.NewTextBlock(user))},
 	})
 	if err != nil {
 		return "", err
@@ -89,6 +121,12 @@ func (c *Client) Structured(ctx context.Context, req StructuredRequest) (string,
 		if text, ok := block.AsAny().(anthropic.TextBlock); ok {
 			sb.WriteString(text.Text)
 		}
+	}
+	if resp.StopReason == anthropic.StopReasonMaxTokens {
+		return "", fmt.Errorf("reply cut off at max_tokens (%d)", maxTokens)
+	}
+	if strings.TrimSpace(sb.String()) == "" {
+		return "", fmt.Errorf("empty reply (stop reason %q)", resp.StopReason)
 	}
 	return sb.String(), nil
 }

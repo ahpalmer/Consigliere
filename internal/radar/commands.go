@@ -26,13 +26,16 @@ type Commands struct {
 	Clock    clock.Clock
 	Tasks    *agent.Tasks
 	Channel  channel.Channel
+	// Buttons under /item details; nil means the 👍/👎 feedback buttons.
+	ItemButtons func(itemID int64) []channel.Button
 }
 
 func (c *Commands) Commands() []commands.Info {
 	return []commands.Info{
 		{Name: "/scan", Description: "check all watched sources now, then score what's new"},
 		{Name: "/score", Description: "scoring progress; starts scoring if anything is waiting"},
-		{Name: "/digest", Description: "best new items; '/digest reset' starts over from the top"},
+		{Name: "/options", Description: "best new items, ranked; '/options reset' starts over from the top"},
+		{Name: "/digest", Description: "same as /options"},
 		{Name: "/item", Description: "full details for one item, e.g. /item 123"},
 		{Name: "/good", Description: "mark item(s) as a good find, e.g. /good 123 456"},
 		{Name: "/bad", Description: "mark item(s) as a miss, e.g. /bad 123"},
@@ -46,13 +49,13 @@ func (c *Commands) Handle(ctx context.Context, command, args string, _ int64) (s
 		return c.scan(ctx)
 	case "/score":
 		return c.score(ctx)
-	case "/digest":
+	case "/options", "/digest":
 		if strings.EqualFold(args, "reset") {
 			n, err := c.Digest.Reset(ctx)
 			if err != nil || n == 0 {
 				return "Nothing to reset; no items have been sent yet.", err
 			}
-			return fmt.Sprintf("Reset %d item(s). Send /digest to start from the top.", n), nil
+			return fmt.Sprintf("Reset %d item(s). Send /options to start from the top.", n), nil
 		}
 		result, err := c.Digest.Next(ctx)
 		if err != nil || result.Text == "" {
@@ -150,7 +153,14 @@ func (c *Commands) item(ctx context.Context, args string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return Detail(item, c.Clock.Now()), nil
+	buttons := FeedbackButtons(item.ID)
+	if c.ItemButtons != nil {
+		buttons = c.ItemButtons(item.ID)
+	}
+	if err := c.Channel.Notify(ctx, Detail(item, c.Clock.Now()), buttons...); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (c *Commands) feedback(ctx context.Context, args string, value int) (string, error) {

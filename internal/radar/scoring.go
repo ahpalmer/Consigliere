@@ -6,9 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 
@@ -21,6 +19,10 @@ import (
 var scoreRubric string
 
 const OtherCategory = "other"
+
+// ScoringProfileFiles are the profile files (under profile/) the scorer reads, whichever exist. Other profile files
+// (bullet bank, stories, connections) serve the apply kit and would only add cost and noise to scoring.
+var ScoringProfileFiles = []string{"summary.md", "resume.master.md", "about.md"}
 
 // Long descriptions are mostly boilerplate (benefits, EEO); the first ~12K chars carry the signal.
 const maxDescriptionChars = 12_000
@@ -83,23 +85,12 @@ func (s LLMScorer) BuildContext() (ScoringContext, error) {
 	}
 
 	var profile strings.Builder
-	dir, err := s.Pack.Resolve("profile")
-	if err != nil {
-		return ScoringContext{}, err
-	}
-	if entries, err := os.ReadDir(dir); err == nil {
-		names := make([]string, 0, len(entries))
-		for _, e := range entries {
-			if !e.IsDir() {
-				names = append(names, e.Name())
-			}
+	for _, name := range ScoringProfileFiles {
+		text, ok, err := s.Pack.ReadText("profile/" + name)
+		if err != nil {
+			return ScoringContext{}, err
 		}
-		sort.Strings(names)
-		for _, name := range names {
-			text, _, err := s.Pack.ReadText("profile/" + name)
-			if err != nil {
-				return ScoringContext{}, err
-			}
+		if ok && strings.TrimSpace(text) != "" {
 			fmt.Fprintf(&profile, "## %s\n%s\n\n", name, strings.TrimSpace(text))
 		}
 	}

@@ -36,17 +36,40 @@ func (s *Sender) Notify(ctx context.Context, text string, buttons ...channel.But
 func (s *Sender) Send(ctx context.Context, chatID int64, text string, buttons []channel.Button) error {
 	chunks := chunk(text, maxMessageLength)
 	for i, c := range chunks {
-		var inline []InlineButton
+		var keyboard [][]InlineButton
 		if i == len(chunks)-1 {
-			for _, b := range buttons {
-				inline = append(inline, InlineButton{Text: b.Label, CallbackData: b.Data})
-			}
+			keyboard = keyboardOf(buttons)
 		}
-		if err := s.API.SendMessage(ctx, chatID, c, inline); err != nil {
+		if err := s.API.SendMessage(ctx, chatID, c, keyboard); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// SendFile delivers a document to the owner.
+func (s *Sender) SendFile(ctx context.Context, name string, data []byte, caption string) error {
+	if s.Owner == 0 {
+		slog.Warn("no owner chat configured; dropping file")
+		return nil
+	}
+	return s.API.SendDocument(ctx, s.Owner, name, data, caption)
+}
+
+// keyboardOf groups buttons into rows by Row, keeping their order within each row.
+func keyboardOf(buttons []channel.Button) [][]InlineButton {
+	var rows [][]InlineButton
+	index := map[int]int{}
+	for _, b := range buttons {
+		i, ok := index[b.Row]
+		if !ok {
+			i = len(rows)
+			index[b.Row] = i
+			rows = append(rows, nil)
+		}
+		rows[i] = append(rows[i], InlineButton{Text: b.Label, CallbackData: b.Data})
+	}
+	return rows
 }
 
 func chunk(text string, size int) []string {
@@ -157,6 +180,9 @@ func (r *Receiver) handleMessage(ctx context.Context, m Message) {
 		slog.Error("failed handling message", "chat_id", m.Chat.ID, "err", err)
 		reply = "Something broke: " + err.Error()
 	}
+	if reply == "" {
+		return // the handler already sent its own messages
+	}
 	if err := r.Sender.Send(ctx, m.Chat.ID, reply, nil); err != nil {
 		slog.Error("failed sending reply", "err", err)
 	}
@@ -168,14 +194,28 @@ func (r *Receiver) handleCallback(ctx context.Context, cb CallbackQuery) {
 		return
 	}
 	toast := "That button no longer does anything."
-	if h := channel.FindCallbackHandler(r.Callbacks, cb.Data); h != nil {
+	h := channel.FindCallbackHandler(r.Callbacks, cb.Data)
+	if h != nil {
 		var err error
 		if toast, err = h.HandleCallback(ctx, cb.Data); err != nil {
 			slog.Error("failed handling callback", "data", cb.Data, "err", err)
 			toast = "Something broke."
+			h = nil
 		}
 	}
 	if err := r.API.AnswerCallbackQuery(ctx, cb.ID, toast); err != nil {
 		slog.Warn("answering callback failed", "err", err)
+	}
+	if refresher, ok := h.(channel.MessageRefresher); ok && cb.Message != nil {
+		text, buttons, ok, err := refresher.Refresh(ctx, cb.Data)
+		if err != nil {
+			slog.Warn("refreshing message failed", "data", cb.Data, "err", err)
+			return
+		}
+		if ok {
+			if err := r.API.EditMessageText(ctx, cb.Message.Chat.ID, cb.Message.MessageID, text, keyboardOf(buttons)); err != nil {
+				slog.Warn("editing message failed", "err", err)
+			}
+		}
 	}
 }

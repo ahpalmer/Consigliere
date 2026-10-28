@@ -24,3 +24,7 @@ secrets.json
 # ...but never the sample pack's local database
 samples/data-pack/db/
 Consigliere-data/
+# Contact exports and generated resumes are personal wherever they turn up
+connections*.csv
+!samples/data-pack/profile/connections.csv
+*.docx

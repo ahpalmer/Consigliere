@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-
-	"github.com/ahpalmer/consigliere/internal/channel"
 )
 
 // ScanJob polls every source, then scores right away so instant alerts go out within the hour.
@@ -53,22 +51,4 @@ func (j *ScoreJob) Schedule() string { return j.Cron }
 func (j *ScoreJob) Run(ctx context.Context) error {
 	_, _, err := j.Scoring.Run(ctx)
 	return err
-}
-
-// DigestJob sends the daily digest if there's anything in it.
-type DigestJob struct {
-	Digest  *Digest
-	Channel channel.Channel
-	Cron    string
-}
-
-func (j *DigestJob) Name() string     { return "radar-digest" }
-func (j *DigestJob) Schedule() string { return j.Cron }
-
-func (j *DigestJob) Run(ctx context.Context) error {
-	result, err := j.Digest.Next(ctx)
-	if err != nil || result.Shown == 0 {
-		return err
-	}
-	return j.Channel.Notify(ctx, result.Text)
 }

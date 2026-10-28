@@ -26,8 +26,10 @@ import (
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/config"
 	"github.com/ahpalmer/consigliere/internal/datapack"
+	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/llm"
 	"github.com/ahpalmer/consigliere/internal/mail"
+	"github.com/ahpalmer/consigliere/internal/pipeline"
 	"github.com/ahpalmer/consigliere/internal/radar"
 	"github.com/ahpalmer/consigliere/internal/router"
 	"github.com/ahpalmer/consigliere/internal/scheduler"
@@ -118,23 +120,31 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		&mail.Source{DB: db, Mailbox: mail.NewGmail(cfg.Mail), Extractor: mail.LLMExtractor{LLM: llmClient}, Clock: clk,
 			Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains},
 	}}
-	alerts := &radar.Alerts{DB: db, Ranking: ranking, Channel: sender, Clock: clk, MinScore: cfg.Radar.AlertMinScore}
+	// Every item shown on its own gets 👍/👎 plus "🎯 Make active", which starts a pursuit.
+	itemButtons := func(id int64) []channel.Button { return append(radar.FeedbackButtons(id), pipeline.ActivateButton(id)) }
+	alerts := &radar.Alerts{DB: db, Ranking: ranking, Channel: sender, Clock: clk, MinScore: cfg.Radar.AlertMinScore, Buttons: itemButtons}
 	scoring := &radar.ScoringRunner{DB: db, Ranking: ranking, Alerts: alerts, State: state, Clock: clk, Tasks: tasks,
 		BatchSize: cfg.Radar.ScoreBatchSize, Concurrency: cfg.Radar.ScoreConcurrency,
 		Scorer: radar.LLMScorer{LLM: llmClient, Model: scoreModel, Owner: cfg.Agent.OwnerName, Pack: pack, Config: radarCfg, Clock: clk}}
 	digest := &radar.Digest{DB: db, Ranking: ranking, Clock: clk, MaxItems: cfg.Radar.DigestMaxItems, MinScore: cfg.Radar.DigestMinScore}
 	feedback := &radar.Feedback{DB: db, Clock: clk}
 	radarCommands := &radar.Commands{DB: db, Scanner: scanner, Scoring: scoring, Digest: digest, Feedback: feedback, Config: radarCfg, Clock: clk,
-		Tasks: tasks, Channel: sender}
+		Tasks: tasks, Channel: sender, ItemButtons: itemButtons}
+
+	// Pipeline: active → waiting → completed, with the apply kit.
+	pipe := &pipeline.Pipeline{DB: db, Clock: clk, Location: location,
+		SoftCap: cfg.Pipeline.ActiveSoftCap, FollowUpDays: cfg.Pipeline.FollowUpDays, GhostDays: cfg.Pipeline.GhostDays}
+	pipelineCommands := &pipeline.Commands{Pipeline: pipe, Channel: sender, Files: sender, Tasks: tasks, State: state,
+		Kit: &kit.Kit{Pack: pack, LLM: llmClient, Owner: cfg.Agent.OwnerName}}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
-	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands),
-		Callbacks: []channel.CallbackHandler{feedback}, Allowed: cfg.Telegram.AllowedChatIds}
+	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands, pipelineCommands),
+		Callbacks: []channel.CallbackHandler{feedback, pipelineCommands}, Allowed: cfg.Telegram.AllowedChatIds}
 	sched := &scheduler.Scheduler{State: state, Channel: sender, Location: location, PingURL: cfg.Scheduler.HealthchecksPingUrl,
 		Jobs: []scheduler.Job{
 			&radar.ScanJob{Scanner: scanner, Scoring: scoring, Cron: cfg.Radar.ScanCron},
 			&radar.ScoreJob{Scoring: scoring, Cron: cfg.Radar.ScoreCron},
-			&radar.DigestJob{Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
+			&pipeline.Briefing{Pipeline: pipe, Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
 		}}
 
 	// Run until Ctrl+C / SIGTERM, then stop in order: polling and scheduling first, then background work, and only

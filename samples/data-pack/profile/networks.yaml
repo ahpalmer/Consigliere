@@ -1,0 +1,6 @@
+# Veteran networks shown in apply kits. Company names match exactly after dropping punctuation and Inc/LLC.
+companies:
+  Initech: ["Initech Veterans Network (fictional)"]
+general:
+  - "American Corporate Partners (ACP): free year-long mentorship with corporate employees"
+  - "Hire Heroes USA: free career coaching for veterans"

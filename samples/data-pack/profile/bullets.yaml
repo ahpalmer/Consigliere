@@ -1,0 +1,47 @@
+# Fictional profile for demos and tests. The apply kit builds a one-page resume from this file: it picks and orders
+# bullets by id within each section and never writes new claims. Bullets marked `draft: true` are never used.
+name: SAM SAMPLE
+contact: "sam@example.com · linkedin.com/in/sam-sample · github.com/sam-sample"
+tagline: "Platform engineer · Former Army officer"
+
+skills:
+  - "Languages: Go, Python, Bash, TypeScript"
+  - "Infrastructure: Linux, Kubernetes, Terraform, AWS"
+
+sections:
+  - id: initech
+    org: "Initech  —  Platform Engineer"
+    dates: "2021 – Present"
+    min: 3
+    max: 5
+    bullets:
+      - id: ini-ci
+        tags: [ci-cd, devex]
+        text: "Halved build times: moved 40 services to a shared CI pipeline with remote caching."
+      - id: ini-k8s
+        tags: [kubernetes, infrastructure]
+        text: "Migrated batch jobs to Kubernetes: 120 cron jobs moved with zero missed runs."
+      - id: ini-oncall
+        tags: [oncall, reliability]
+        text: "Cut pages by 60%: rewrote noisy alerts and added runbooks for every remaining one."
+      - id: ini-terraform
+        tags: [iac]
+        text: "Codified infrastructure: brought 300 hand-made cloud resources under Terraform."
+      - id: ini-draft
+        draft: true
+        tags: [leadership]
+        text: "Mentored new hires: (unreviewed draft, never used until approved)."
+
+  - id: army
+    org: "U.S. Army  —  Signal Officer"
+    dates: "2014 – 2021"
+    min: 1
+    max: 1
+    bullets:
+      - id: army-lead
+        tags: [leadership, army]
+        text: "Platoon leader: led 30 soldiers running communications for a 4,000-person brigade."
+
+education:
+  - text: "State University  —  B.S., Computer Science"
+    dates: "2014"

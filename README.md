@@ -42,6 +42,8 @@ flowchart LR
 | `internal/llm` | Claude client: per-task models, structured output, chat with refusal fallback, usage, prompts |
 | `internal/store` | SQLite, embedded migrations, timestamp encoding |
 | `internal/radar` | Source watching: job boards, normalize, dedupe, filter, score, rank, alert, digest |
+| `internal/pipeline` | Pursuits: active → waiting → completed, per-pursuit checklist, nudges, morning briefing |
+| `internal/kit` | Apply kit: contacts from your own export, people-search links, bullet-selected one-page DOCX, drafts |
 | `internal/mail` | Read-only alert-email source (Gmail API + LLM extraction, URL-verified) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
@@ -71,13 +73,22 @@ go run ./cmd/consigliere secrets set "Telegram:AllowedChatIds:0" "<id>"
 
 Restart and chat. To use a real data pack, set `DataPack:Path` (relative to the repo root, e.g. `../Consigliere-data`).
 
-Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/digest [reset]`,
-`/item <id>`, `/good <id>`, `/bad <id>`, `/sources`.
+Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/options [reset]`
+(alias `/digest`), `/item <id>`, `/good <id>`, `/bad <id>`, `/sources`, and the pipeline's `/active`, `/waiting`,
+`/completed`, `/activate`, `/applied`, `/interview`, `/followedup`, `/done`, `/note`, `/complete`, `/reopen`,
+`/kit`, `/prep`, `/thanks` (`/help` describes each).
 
 Radar polls the sources in `radar/watchlist.yaml` hourly, scores new items against the owner's profile with a
-cheap model (structured JSON output, cached by content + profile), alerts instantly on strong matches, and sends a
-ranked digest at 08:00 (`Radar` and `Scheduler` sections in `config/consigliere.json`). Items go into SQLite at
-`db/consigliere.db` inside the data pack.
+cheap model (structured JSON output, cached by content + profile), and alerts instantly on strong matches. Items go
+into SQLite at `db/consigliere.db` inside the data pack.
+
+The pipeline is a short list, not a firehose: 🎯 on an alert (or `/activate`) makes an item *active*, with a checklist
+(tailor resume → find people → outreach → submit → follow up → prep → interview → thank-you). 📨 moves it to
+*waiting* with follow-up nudges at 7 and 14 days and a "ghosted?" check at 30; `/interview` brings it back to active;
+`/complete` files it with an outcome. `/kit` builds the apply kit: people you know there (from your own LinkedIn
+export, read locally), people-search links you open yourself, veteran networks, a one-page DOCX that only selects
+and orders your existing bullets (unknown or unreviewed ids are rejected), and outreach drafts. At 08:00 a morning
+briefing lists the day's to-dos, then the best new options. Nothing is ever sent or submitted on your behalf.
 
 ## Develop
 
@@ -95,6 +106,6 @@ gofmt -l .
 - [x] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
 - [x] M4: read-only ingestion from a dedicated forwarding inbox ([docs/mail.md](docs/mail.md))
 - [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups
-- [ ] M6: pipeline (options → active → waiting → completed) and apply kit
+- [x] M6: pipeline (options → active → waiting → completed), apply kit, morning briefing
 - [ ] M7: application updates from email
 - [ ] M8: React + TypeScript dashboard

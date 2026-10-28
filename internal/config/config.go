@@ -23,6 +23,7 @@ type Config struct {
 	Llm       Llm
 	Telegram  Telegram
 	Radar     Radar
+	Pipeline  Pipeline
 	Scheduler Scheduler
 	Mail      Mail
 }
@@ -60,6 +61,15 @@ type Radar struct {
 	ScoreBatchSize, ScoreConcurrency int
 	// Location of the SQLite database inside the data pack.
 	DatabasePath string
+}
+
+type Pipeline struct {
+	// Warn when activating beyond this many active pursuits (a soft cap: it never blocks).
+	ActiveSoftCap int
+	// Days after applying before follow-up reminders (sent twice, this many days apart).
+	FollowUpDays int
+	// Days of silence after applying before proposing "ghosted".
+	GhostDays int
 }
 
 type Scheduler struct {
@@ -121,6 +131,7 @@ func defaults() map[string]any {
 			"DigestMaxItems": 25, "DigestMinScore": 50, "AlertMinScore": 75, "ScoreBatchSize": 200, "ScoreConcurrency": 4,
 			"DatabasePath": "db/consigliere.db",
 		},
+		"Pipeline":  map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30},
 		"Scheduler": map[string]any{"TimeZone": "America/New_York"},
 		"Mail": map[string]any{
 			"Query": "newer_than:14d", "MaxMessagesPerScan": 50,
