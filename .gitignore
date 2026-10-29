@@ -28,3 +28,7 @@ Consigliere-data/
 connections*.csv
 !samples/data-pack/profile/connections.csv
 *.docx
+# Dashboard: dependencies, and the build that gets embedded (only its placeholder is committed)
+web/node_modules/
+internal/web/dist/*
+!internal/web/dist/.gitkeep

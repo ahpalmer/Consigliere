@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -11,7 +10,6 @@ import (
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/channel"
 	"github.com/ahpalmer/consigliere/internal/commands"
-	"github.com/ahpalmer/consigliere/internal/kit"
 )
 
 // prefix routes button taps to Commands.
@@ -21,7 +19,7 @@ const prefix = "pp:"
 // and reports back, so the chat stays responsive.
 type Commands struct {
 	Pipeline *Pipeline
-	Kit      *kit.Kit
+	Drafts   *Drafts
 	Channel  channel.Channel
 	Files    channel.FileSender
 	Tasks    *agent.Tasks
@@ -226,45 +224,55 @@ func (c *Commands) activated(ctx context.Context, p *Pursuit, created bool) (str
 }
 
 func (c *Commands) kit(ctx context.Context, args string) (string, error) {
-	if strings.TrimSpace(args) == "" {
+	ref := strings.TrimSpace(args)
+	if ref == "" {
 		return "Usage: /kit P3 or /kit 123 (a radar item id)", nil
 	}
-	job, label, err := c.jobFor(ctx, args)
-	if err != nil {
+	p, err := c.Pipeline.Resolve(ctx, ref)
+	var itemID *int64
+	label := ""
+	switch {
+	case err == nil:
+		label = p.Ref() + " · " + p.Company
+	case errors.Is(err, ErrNotFound):
+		id, perr := strconv.ParseInt(strings.TrimPrefix(ref, "#"), 10, 64)
+		if perr != nil {
+			return "No pursuit " + ref + ".", nil
+		}
+		p, itemID, label = nil, &id, fmt.Sprintf("#%d", id)
+	default:
+		return "", err
+	}
+	if _, err := c.Drafts.StartKit(ctx, p, itemID, c.sendKit); err != nil {
 		return userError(err)
 	}
-	c.background("kit", func(ctx context.Context) (string, error) {
-		result, err := c.Kit.Build(ctx, job)
-		if err != nil {
-			return "", err
-		}
-		if err := c.Channel.Notify(ctx, result.Text); err != nil {
-			return "", err
-		}
-		if result.File != nil && c.Files != nil {
-			return "", c.Files.SendFile(ctx, result.FileName, result.File, "Tailored for "+job.Company+". Review before sending.")
-		}
-		return "", nil
-	})
 	return "✍️ Building the kit for " + label + ". About a minute.", nil
 }
 
+func (c *Commands) sendKit(ctx context.Context, d Draft, file []byte) error {
+	if d.Status != DraftReady {
+		return c.Channel.Notify(ctx, "⚠ The kit failed: "+d.Error)
+	}
+	if err := c.Channel.Notify(ctx, d.Text); err != nil {
+		return err
+	}
+	if file != nil && c.Files != nil {
+		return c.Files.SendFile(ctx, d.FileName, file, "Tailored resume. Review before sending.")
+	}
+	return nil
+}
+
 func (c *Commands) prep(ctx context.Context, p *Pursuit, extra string) (string, error) {
-	job, err := c.jobForPursuit(ctx, p)
-	if err != nil {
-		return "", err
-	}
-	notes := strings.TrimSpace(p.Notes + "\n" + extra)
-	if p.InterviewAt != nil {
-		notes = "Interview: " + p.InterviewAt.In(c.Pipeline.Location).Format(timeFormat) + "\n" + notes
-	}
-	c.background("prep", func(ctx context.Context) (string, error) {
-		text, err := c.Kit.Prep(ctx, job, notes)
-		if err != nil {
-			return "", err
+	_, err := c.Drafts.StartPrep(ctx, p, extra, func(ctx context.Context, d Draft, _ []byte) error {
+		if d.Status != DraftReady {
+			return c.Channel.Notify(ctx, "⚠ The prep pack failed: "+d.Error)
 		}
-		return fmt.Sprintf("🎤 Prep pack: %s · %s\n\n%s\n\nTap ✅ on the card or /done %s prep when you're ready.", p.Title, p.Company, text, p.Ref()), nil
+		return c.Channel.Notify(ctx, fmt.Sprintf("🎤 Prep pack: %s · %s\n\n%s\n\nTap ✅ on the card or /done %s prep when you're ready.",
+			p.Title, p.Company, d.Text, p.Ref()))
 	})
+	if err != nil {
+		return userError(err)
+	}
 	return "🎤 Writing a prep pack for " + p.Ref() + ". About a minute.", nil
 }
 
@@ -272,77 +280,17 @@ func (c *Commands) thanks(ctx context.Context, p *Pursuit, details string) (stri
 	if strings.TrimSpace(details) == "" {
 		return "Tell me who and what you talked about: /thanks " + p.Ref() + " Dana (eng manager), we discussed their VM fleet migration", nil
 	}
-	job, err := c.jobForPursuit(ctx, p)
+	_, err := c.Drafts.StartThanks(ctx, p, details, func(ctx context.Context, d Draft, _ []byte) error {
+		if d.Status != DraftReady {
+			return c.Channel.Notify(ctx, "⚠ The thank-you draft failed: "+d.Error)
+		}
+		return c.Channel.Notify(ctx, fmt.Sprintf("✉️ Thank-you draft for %s · %s (edit, then send it yourself):\n\n%s\n\n/done %s thanks once it's sent.",
+			p.Ref(), p.Company, d.Text, p.Ref()))
+	})
 	if err != nil {
-		return "", err
+		return userError(err)
 	}
-	c.background("thank-you", func(ctx context.Context) (string, error) {
-		text, err := c.Kit.Thanks(ctx, job, details)
-		if err != nil {
-			return "", err
-		}
-		return fmt.Sprintf("✉️ Thank-you draft for %s · %s (edit, then send it yourself):\n\n%s\n\n/done %s thanks once it's sent.", p.Ref(), p.Company, text, p.Ref()), nil
-	})
 	return "✉️ Drafting a thank-you for " + p.Ref() + ".", nil
-}
-
-// background runs model work under the app's lifetime and sends the result (or the failure) to the owner.
-func (c *Commands) background(name string, f func(ctx context.Context) (string, error)) {
-	c.Tasks.Go(name, func(ctx context.Context) error {
-		text, err := f(ctx)
-		if ctx.Err() != nil {
-			return nil
-		}
-		if err != nil {
-			text = fmt.Sprintf("⚠ The %s failed: %v", name, err)
-		}
-		if text == "" {
-			return nil
-		}
-		return c.Channel.Notify(ctx, text)
-	})
-}
-
-// jobFor turns "P3" or a radar item id into the posting a kit is built for.
-func (c *Commands) jobFor(ctx context.Context, ref string) (kit.Job, string, error) {
-	ref = strings.TrimSpace(ref)
-	p, err := c.Pipeline.Resolve(ctx, ref)
-	if err == nil {
-		job, err := c.jobForPursuit(ctx, p)
-		return job, p.Ref() + " · " + p.Company, err
-	}
-	if !errors.Is(err, ErrNotFound) {
-		return kit.Job{}, "", err
-	}
-	id, perr := strconv.ParseInt(strings.TrimPrefix(ref, "#"), 10, 64)
-	if perr != nil {
-		return kit.Job{}, "", fmt.Errorf("no pursuit %s", ref)
-	}
-	job, err := c.itemJob(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return kit.Job{}, "", fmt.Errorf("no item #%d", id)
-	}
-	return job, job.Company, err
-}
-
-func (c *Commands) jobForPursuit(ctx context.Context, p *Pursuit) (kit.Job, error) {
-	if p.ItemID != nil {
-		job, err := c.itemJob(ctx, *p.ItemID)
-		if err == nil {
-			return job, nil
-		}
-		if !errors.Is(err, sql.ErrNoRows) {
-			return kit.Job{}, err
-		}
-	}
-	return kit.Job{Company: p.Company, Title: p.Title, URL: p.URL}, nil
-}
-
-func (c *Commands) itemJob(ctx context.Context, id int64) (kit.Job, error) {
-	var j kit.Job
-	err := c.Pipeline.DB.QueryRowContext(ctx, `SELECT "Company", "Title", "Url", "Locations", "Description" FROM "RadarItems" WHERE "Id" = ?`, id).
-		Scan(&j.Company, &j.Title, &j.URL, &j.Locations, &j.Description)
-	return j, err
 }
 
 // resolve reads the leading pursuit reference from args. When it can't, p is nil and reply says why.

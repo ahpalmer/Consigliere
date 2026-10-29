@@ -47,5 +47,8 @@
       "builtin.com",
       "levels.fyi"
     ]
+  },
+  "Web": {
+    "Listen": "127.0.0.1:8080"
   }
 }

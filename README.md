@@ -7,8 +7,9 @@ that should be predictable.
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
+    browser([Browser on the tailnet]) -. dashboard, signed in .-> host
     subgraph AKS["AKS (single replica, no ingress)"]
-        host[cmd/consigliere<br/>receiver + scheduler]
+        host[cmd/consigliere<br/>receiver + scheduler + dashboard]
         host --> router[router<br/>slash commands]
         router --> chat[llm.Chat<br/>Claude]
         host --> radar[radar<br/>sources → filter → score → digest]
@@ -28,10 +29,12 @@ flowchart LR
 - **Narrow, explicit capabilities.** No shell, browser or general file-write tools. Everything the agent
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
-- **Minimal attack surface.** Telegram uses long-polling, so the host accepts no inbound connections, and only
-  allowlisted chat IDs are answered. Secrets live in a file outside the repo locally and in Key Vault in Azure.
+- **Minimal attack surface.** Telegram uses long-polling (outbound only), and only allowlisted chat IDs are answered.
+  The one listener is the dashboard: loopback by default, reachable from the cluster only over a private tailnet, and
+  behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
 - **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to a tiny container), the official
-  Anthropic and Google SDKs, and a ~150-line Telegram Bot API client instead of a framework.
+  Anthropic and Google SDKs, a ~150-line Telegram Bot API client instead of a framework, and a dashboard that's just
+  React, React Router and hand-written CSS.
 
 ## Layout
 
@@ -46,6 +49,8 @@ flowchart LR
 | `internal/kit` | Apply kit: contacts from your own export, people-search links, bullet-selected one-page DOCX, drafts |
 | `internal/mail` | Read-only alert-email source (Gmail API + LLM extraction, URL-verified) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
+| `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
+| `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
 
@@ -73,6 +78,9 @@ go run ./cmd/consigliere secrets set "Telegram:AllowedChatIds:0" "<id>"
 
 Restart and chat. To use a real data pack, set `DataPack:Path` (relative to the repo root, e.g. `../Consigliere-data`).
 
+The dashboard is at http://127.0.0.1:8080 once the app is built (Node 22+): `cd web && npm ci && npm run build`, then
+restart. See [docs/dashboard.md](docs/dashboard.md) for hot reload, sign-in and private access from the cluster.
+
 Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/options [reset]`
 (alias `/digest`), `/item <id>`, `/good <id>`, `/bad <id>`, `/sources`, and the pipeline's `/active`, `/waiting`,
 `/completed`, `/activate`, `/applied`, `/interview`, `/followedup`, `/done`, `/note`, `/complete`, `/reopen`,
@@ -96,6 +104,7 @@ briefing lists the day's to-dos, then the best new options. Nothing is ever sent
 go test ./...        # unit + pipeline tests against real SQLite and recorded board responses
 go vet ./...
 gofmt -l .
+cd web && npm run typecheck && npm test   # dashboard
 ```
 
 ## Roadmap
@@ -108,4 +117,4 @@ gofmt -l .
 - [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups
 - [x] M6: pipeline (options → active → waiting → completed), apply kit, morning briefing
 - [ ] M7: application updates from email
-- [ ] M8: React + TypeScript dashboard
+- [x] M8: React + TypeScript dashboard ([docs/dashboard.md](docs/dashboard.md))

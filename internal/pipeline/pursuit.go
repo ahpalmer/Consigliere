@@ -400,6 +400,69 @@ func (pl *Pipeline) Tick(ctx context.Context, id int64, step string) (*Pursuit, 
 	return pl.after(ctx, id, err)
 }
 
+// Untick marks a checklist step not done, for a mis-tap.
+func (pl *Pipeline) Untick(ctx context.Context, id int64, step string) (*Pursuit, error) {
+	if !slices.ContainsFunc(Steps, func(s Step) bool { return s.Key == step }) {
+		return nil, fmt.Errorf("unknown step %q", step)
+	}
+	stamp := store.FormatTime(pl.Clock.Now())
+	err := pl.update(ctx, id, func(tx *sql.Tx, _ *Pursuit) error {
+		res, err := tx.ExecContext(ctx, `DELETE FROM "PursuitSteps" WHERE "PursuitId" = ? AND "Step" = ?`, id, step)
+		if err != nil {
+			return err
+		}
+		if n, _ := res.RowsAffected(); n == 0 {
+			return nil
+		}
+		return event(ctx, tx, id, stamp, "step_undone", step)
+	})
+	return pl.after(ctx, id, err)
+}
+
+// Event is one entry in a pursuit's history.
+type Event struct {
+	At           time.Time
+	Kind, Detail string
+}
+
+// Events returns a pursuit's history, oldest first.
+func (pl *Pipeline) Events(ctx context.Context, id int64) ([]Event, error) {
+	rows, err := pl.DB.QueryContext(ctx, `SELECT "At", "Kind", coalesce("Detail", '') FROM "PursuitEvents" WHERE "PursuitId" = ? ORDER BY "At", "Id"`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Event
+	for rows.Next() {
+		var e Event
+		var at string
+		if err := rows.Scan(&at, &e.Kind, &e.Detail); err != nil {
+			return nil, err
+		}
+		if e.At, err = store.ParseTime(at); err != nil {
+			return nil, err
+		}
+		out = append(out, e)
+	}
+	return out, rows.Err()
+}
+
+// ForItems maps radar item ids to their pursuit (the open one, else the most recent).
+func (pl *Pipeline) ForItems(ctx context.Context, itemIDs []int64) (map[int64]*Pursuit, error) {
+	out := map[int64]*Pursuit{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	found, err := pl.query(ctx, `p."ItemId" IN (`+store.Placeholders(len(itemIDs))+`) ORDER BY (p."Stage" <> 'completed'), p."Id"`, store.Args(itemIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	for _, p := range found { // later rows win: open beats completed, newer beats older
+		out[*p.ItemID] = p
+	}
+	return out, nil
+}
+
 // FollowedUp ticks "followup" and schedules the second reminder (2 × FollowUpDays after applying), if it's
 // still ahead; after that, reminders stop.
 func (pl *Pipeline) FollowedUp(ctx context.Context, id int64) (*Pursuit, error) {

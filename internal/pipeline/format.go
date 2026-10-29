@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -182,42 +183,70 @@ func completion(p *Pursuit) string {
 	return s
 }
 
-// Agenda is the to-do part of the morning briefing: interviews this week, thank-yous owed, follow-ups due,
-// and each active pursuit's next step. Empty when there's nothing to do.
-func (pl *Pipeline) Agenda(active, waiting []*Pursuit) string {
+// Todo is one thing the owner should do about a pursuit.
+type Todo struct {
+	Kind    string // interview | thanks | followup | ghost | next
+	Pursuit *Pursuit
+	Label   string // the step, for "next"
+	// For interviews: whether prep is done.
+	PrepDone bool
+}
+
+// Todos lists what needs doing, most urgent first: interviews this week, thank-yous owed, follow-ups due, ghost
+// checks due, then each active pursuit's next step.
+func (pl *Pipeline) Todos(active, waiting []*Pursuit) []Todo {
 	now := pl.Clock.Now()
-	var interviews, thanks, followUps, next []string
+	var interviews, thanks, followUps, ghosts, next []Todo
 	for _, p := range active {
 		switch {
 		case p.InterviewAt != nil && p.InterviewAt.After(now) && p.InterviewAt.Before(now.AddDate(0, 0, 7)):
-			line := fmt.Sprintf("🎤 %s: %s · %s · %s", p.InterviewAt.In(pl.Location).Format(timeFormat), p.Ref(), p.Title, p.Company)
-			if _, done := p.Done["prep"]; !done {
-				line += fmt.Sprintf(" (prep not done: /prep %s)", p.Ref())
-			}
-			interviews = append(interviews, line)
+			_, prepped := p.Done["prep"]
+			interviews = append(interviews, Todo{Kind: "interview", Pursuit: p, PrepDone: prepped})
 		case p.InterviewAt != nil && !p.InterviewAt.After(now) && p.InterviewAt.After(now.Add(-72*time.Hour)):
 			if _, done := p.Done["thanks"]; !done {
-				thanks = append(thanks, fmt.Sprintf("✉️ Thank-you for %s · %s (/thanks %s <who, what you discussed>)", p.Ref(), p.Company, p.Ref()))
+				thanks = append(thanks, Todo{Kind: "thanks", Pursuit: p})
 			}
 		default:
 			if s := p.NextStep(); s != nil {
-				next = append(next, fmt.Sprintf("🎯 %s · %s: %s", p.Ref(), p.Company, s.Label))
+				next = append(next, Todo{Kind: "next", Pursuit: p, Label: s.Label})
 			}
 		}
 	}
 	for _, p := range waiting {
 		if p.FollowUpAt != nil && !p.FollowUpAt.After(now) {
+			followUps = append(followUps, Todo{Kind: "followup", Pursuit: p})
+		}
+		if p.GhostCheckAt != nil && !p.GhostCheckAt.After(now) {
+			ghosts = append(ghosts, Todo{Kind: "ghost", Pursuit: p})
+		}
+	}
+	return slices.Concat(interviews, thanks, followUps, ghosts, next)
+}
+
+// Agenda is the to-do part of the morning briefing: interviews this week, thank-yous owed, follow-ups due,
+// and each active pursuit's next step. Empty when there's nothing to do. (Ghost checks are asked separately.)
+func (pl *Pipeline) Agenda(active, waiting []*Pursuit) string {
+	now := pl.Clock.Now()
+	var sb strings.Builder
+	for _, t := range pl.Todos(active, waiting) {
+		p := t.Pursuit
+		switch t.Kind {
+		case "interview":
+			line := fmt.Sprintf("🎤 %s: %s · %s · %s", p.InterviewAt.In(pl.Location).Format(timeFormat), p.Ref(), p.Title, p.Company)
+			if !t.PrepDone {
+				line += fmt.Sprintf(" (prep not done: /prep %s)", p.Ref())
+			}
+			sb.WriteString(line + "\n")
+		case "thanks":
+			fmt.Fprintf(&sb, "✉️ Thank-you for %s · %s (/thanks %s <who, what you discussed>)\n", p.Ref(), p.Company, p.Ref())
+		case "followup":
 			applied := ""
 			if p.AppliedAt != nil {
 				applied = " (applied " + ago(*p.AppliedAt, now) + ")"
 			}
-			followUps = append(followUps, fmt.Sprintf("📬 Follow up: %s · %s · %s%s", p.Ref(), p.Title, p.Company, applied))
-		}
-	}
-	var sb strings.Builder
-	for _, group := range [][]string{interviews, thanks, followUps, next} {
-		for _, line := range group {
-			sb.WriteString(line + "\n")
+			fmt.Fprintf(&sb, "📬 Follow up: %s · %s · %s%s\n", p.Ref(), p.Title, p.Company, applied)
+		case "next":
+			fmt.Fprintf(&sb, "🎯 %s · %s: %s\n", p.Ref(), p.Company, t.Label)
 		}
 	}
 	return strings.TrimSpace(sb.String())

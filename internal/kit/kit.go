@@ -107,7 +107,7 @@ func (k *Kit) Build(ctx context.Context, job Job) (*Result, error) {
 		for _, ids := range selection {
 			count += len(ids)
 		}
-		resumeLine = fmt.Sprintf("Resume: %d bullets picked and ordered for this posting (file below). Open it, check it fits on one page, then save as PDF if they want one.", count)
+		resumeLine = fmt.Sprintf("Resume: %d bullets picked and ordered for this posting (file below). Open it, check it fits on one page, then save it as a PDF if you want one.", count)
 		if n := profile.DraftCount(); n > 0 {
 			notes = append(notes, fmt.Sprintf("%d draft bullets in %s weren't used. Review them and delete their `draft: true` line to make them available.", n, ProfilePath))
 		}

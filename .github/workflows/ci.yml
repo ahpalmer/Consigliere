@@ -30,5 +30,19 @@ jobs:
 
       - run: go vet ./...
       - run: go test -race ./...
-      - name: Build (static linux binary, as the container will run it)
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Dashboard (type-check, test, build into internal/web/dist)
+        working-directory: web
+        run: |
+          npm ci
+          npm run typecheck
+          npm test
+          npm run build
+
+      - name: Build (static linux binary with the dashboard embedded, as the container will run it)
         run: CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" -o bin/consigliere ./cmd/consigliere

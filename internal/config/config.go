@@ -26,6 +26,7 @@ type Config struct {
 	Pipeline  Pipeline
 	Scheduler Scheduler
 	Mail      Mail
+	Web       Web
 }
 
 type DataPack struct {
@@ -78,6 +79,14 @@ type Scheduler struct {
 	HealthchecksPingUrl string
 }
 
+// Web is the dashboard.
+type Web struct {
+	// Address to listen on; empty turns the dashboard off. Anything but loopback requires Token.
+	Listen string
+	// Sign-in secret for the dashboard. Keep it in secrets.
+	Token string
+}
+
 type Mail struct {
 	ClientId, ClientSecret string
 	// Written by `consigliere auth gmail`.
@@ -128,11 +137,12 @@ func defaults() map[string]any {
 		},
 		"Radar": map[string]any{
 			"ScanCron": "0 * * * *", "ScoreCron": "*/15 * * * *", "DigestCron": "0 8 * * *",
-			"DigestMaxItems": 25, "DigestMinScore": 50, "AlertMinScore": 75, "ScoreBatchSize": 200, "ScoreConcurrency": 4,
+			"DigestMaxItems": 25, "DigestMinScore": 50, "AlertMinScore": 75, "ScoreBatchSize": 200, "ScoreConcurrency": 8,
 			"DatabasePath": "db/consigliere.db",
 		},
 		"Pipeline":  map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30},
 		"Scheduler": map[string]any{"TimeZone": "America/New_York"},
+		"Web":       map[string]any{"Listen": "127.0.0.1:8080"},
 		"Mail": map[string]any{
 			"Query": "newer_than:14d", "MaxMessagesPerScan": 50,
 			"AllowedSenderDomains": []any{"linkedin.com", "indeed.com", "glassdoor.com", "wellfound.com", "ziprecruiter.com", "dice.com", "builtin.com"},

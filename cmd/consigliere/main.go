@@ -35,6 +35,7 @@ import (
 	"github.com/ahpalmer/consigliere/internal/scheduler"
 	"github.com/ahpalmer/consigliere/internal/store"
 	"github.com/ahpalmer/consigliere/internal/telegram"
+	"github.com/ahpalmer/consigliere/internal/web"
 )
 
 func main() {
@@ -134,8 +135,11 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	// Pipeline: active → waiting → completed, with the apply kit.
 	pipe := &pipeline.Pipeline{DB: db, Clock: clk, Location: location,
 		SoftCap: cfg.Pipeline.ActiveSoftCap, FollowUpDays: cfg.Pipeline.FollowUpDays, GhostDays: cfg.Pipeline.GhostDays}
-	pipelineCommands := &pipeline.Commands{Pipeline: pipe, Channel: sender, Files: sender, Tasks: tasks, State: state,
-		Kit: &kit.Kit{Pack: pack, LLM: llmClient, Owner: cfg.Agent.OwnerName}}
+	drafts := &pipeline.Drafts{Pipeline: pipe, Kit: &kit.Kit{Pack: pack, LLM: llmClient, Owner: cfg.Agent.OwnerName}, Tasks: tasks, State: state}
+	if err := drafts.Recover(ctx); err != nil {
+		return err
+	}
+	pipelineCommands := &pipeline.Commands{Pipeline: pipe, Drafts: drafts, Channel: sender, Files: sender, Tasks: tasks, State: state}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
 	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands, pipelineCommands),
@@ -147,13 +151,29 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 			&pipeline.Briefing{Pipeline: pipe, Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
 		}}
 
-	// Run until Ctrl+C / SIGTERM, then stop in order: polling and scheduling first, then background work, and only
-	// then (deferred) close the database, so nothing writes to a closed DB.
+	// The dashboard is optional: an empty Web:Listen turns it off.
+	var dashboard *web.Server
+	if cfg.Web.Listen != "" {
+		if err := web.CheckAddr(cfg.Web.Listen, cfg.Web.Token); err != nil {
+			return err
+		}
+		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Feedback: feedback,
+			Catalog: &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: cfg.Radar.DigestMinScore},
+			Scoring: scoring, State: state, Usage: usage, Clock: clk}
+	}
+
+	// Run until Ctrl+C / SIGTERM, then stop in order: polling, scheduling and the dashboard first, then background
+	// work, and only then (deferred) close the database, so nothing writes to a closed DB.
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	errs := make(chan error, 2)
-	go func() { errs <- receiver.Run(runCtx) }()
-	go func() { errs <- sched.Run(runCtx) }()
+	services := []func(context.Context) error{receiver.Run, sched.Run}
+	if dashboard != nil {
+		services = append(services, dashboard.Run)
+	}
+	errs := make(chan error, len(services))
+	for _, run := range services {
+		go func() { errs <- run(runCtx) }()
+	}
 
 	var firstErr error
 	select {
@@ -163,7 +183,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	}
 	cancel()
 	deadline := time.After(15 * time.Second)
-	for remaining := 2 - boolToInt(firstErr != nil); remaining > 0; remaining-- {
+	for remaining := len(services) - boolToInt(firstErr != nil); remaining > 0; remaining-- {
 		select {
 		case <-errs:
 		case <-deadline:
