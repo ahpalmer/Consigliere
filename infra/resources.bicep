@@ -12,15 +12,15 @@ param budgetStartDate string
 var appServiceAccount = 'system:serviceaccount:consigliere:consigliere'
 var suffix = uniqueString(resourceGroup().id)
 
-// Built-in role definitions.
+// Built-in role definitions: public IDs, the same in every tenant. gitleaks mistakes the "Secrets" ones for keys.
 var roles = {
   reader: 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
   acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
   acrPush: '8311e382-0749-4cb8-b61a-304f252e45ec'
   aksClusterUser: '4abbcc35-e782-43d8-92c5-2d3f1bd2253f'
   aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
-  keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6'
-  keyVaultSecretsOfficer: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7'
+  keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6' // gitleaks:allow
+  keyVaultSecretsOfficer: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // gitleaks:allow
   blobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   blobDataReader: '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 }

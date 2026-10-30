@@ -1,0 +1,3 @@
+# False positives already in history: built-in Azure role IDs in infra/resources.bicep (public, not secrets).
+b7762b00da410f5db6fd3faaaa2a36f75e50f255:infra/resources.bicep:generic-api-key:22
+b7762b00da410f5db6fd3faaaa2a36f75e50f255:infra/resources.bicep:generic-api-key:23
