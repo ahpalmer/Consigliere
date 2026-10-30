@@ -14,9 +14,8 @@ rg=${CONSIGLIERE_RESOURCE_GROUP:-rg-consigliere}
 
 outputs=$(az deployment group show -g "$rg" -n consigliere --query \
   "[properties.outputs.acrLoginServer.value, properties.outputs.appClientId.value, properties.outputs.keyVaultName.value, properties.outputs.backupContainerUrl.value]" \
-  -o tsv | tr -d '\r')
-# shellcheck disable=SC2086 # unquoted on purpose: tabs and newlines become spaces for read
-read -r registry client_id vault backups <<<"$(echo $outputs)"
+  -o tsv | tr '\r\n' '  ')
+read -r registry client_id vault backups <<<"$outputs"
 tenant_id=$(az account show --query tenantId -o tsv | tr -d '\r')
 
 # Gitignored; only ever holds names and IDs, never secrets.
