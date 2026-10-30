@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -22,6 +23,7 @@ type Commands struct {
 	Scoring  *ScoringRunner
 	Digest   *Digest
 	Feedback *Feedback
+	Catalog  *Catalog
 	Config   ConfigLoader
 	Clock    clock.Clock
 	Tasks    *agent.Tasks
@@ -34,7 +36,7 @@ func (c *Commands) Commands() []commands.Info {
 	return []commands.Info{
 		{Name: "/scan", Description: "check all watched sources now, then score what's new"},
 		{Name: "/score", Description: "scoring progress; starts scoring if anything is waiting"},
-		{Name: "/options", Description: "best new items, ranked; '/options reset' starts over from the top"},
+		{Name: "/options", Description: "best new items, ranked; '/options <company>' lists every scored item from one company; '/options reset' starts over from the top"},
 		{Name: "/digest", Description: "same as /options"},
 		{Name: "/item", Description: "full details for one item, e.g. /item 123"},
 		{Name: "/good", Description: "mark item(s) as a good find, e.g. /good 123 456"},
@@ -56,6 +58,9 @@ func (c *Commands) Handle(ctx context.Context, command, args string, _ int64) (s
 				return "Nothing to reset; no items have been sent yet.", err
 			}
 			return fmt.Sprintf("Reset %d item(s). Send /options to start from the top.", n), nil
+		}
+		if strings.TrimSpace(args) != "" {
+			return c.company(ctx, strings.TrimSpace(args))
 		}
 		result, err := c.Digest.Next(ctx)
 		if err != nil || result.Text == "" {
@@ -161,6 +166,46 @@ func (c *Commands) item(ctx context.Context, args string) (string, error) {
 		return "", err
 	}
 	return "", nil
+}
+
+// companyLimit keeps one reply to a few messages; the dashboard's Options page has the rest.
+const companyLimit = 30
+
+// company lists every scored item from companies matching name, by score alone (not grouped by tier like the digest),
+// low scores included. It's browsing, so unlike the digest it marks nothing as sent.
+func (c *Commands) company(ctx context.Context, name string) (string, error) {
+	zero := 0
+	page, err := c.Catalog.Options(ctx, OptionsQuery{Company: name, MinScore: &zero})
+	if err != nil {
+		return "", err
+	}
+	slices.SortStableFunc(page.Options, func(a, b Option) int { return b.RankScore - a.RankScore })
+	page.Options = page.Options[:min(len(page.Options), companyLimit)]
+	if page.Total == 0 {
+		return fmt.Sprintf("No scored items from a company matching %q.", name), nil
+	}
+	var companies []string
+	for _, o := range page.Options {
+		if !slices.Contains(companies, o.Company) {
+			companies = append(companies, o.Company)
+		}
+	}
+	var sb strings.Builder
+	if len(companies) == 1 {
+		fmt.Fprintf(&sb, "%s: %d scored item(s), best first\n", companies[0], page.Total)
+	} else {
+		fmt.Fprintf(&sb, "%q: %d scored item(s) from %s, best first\n", name, page.Total, strings.Join(companies, ", "))
+	}
+	now := c.Clock.Now()
+	for _, o := range page.Options {
+		sb.WriteString("\n" + Line(o.ItemView, now) + "\n")
+	}
+	sb.WriteString("\n")
+	if more := page.Total - len(page.Options); more > 0 {
+		fmt.Fprintf(&sb, "%d more on the dashboard (Options, search %q).\n", more, name)
+	}
+	sb.WriteString("/item <id> for details · /activate <id> to go after one · /good or /bad <id> to rate")
+	return sb.String(), nil
 }
 
 func (c *Commands) feedback(ctx context.Context, args string, value int) (string, error) {

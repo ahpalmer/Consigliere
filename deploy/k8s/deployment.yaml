@@ -1,0 +1,109 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: consigliere
+spec:
+  # Exactly one: Telegram allows one long-poller per bot, and SQLite one writer. Recreate stops the old pod
+  # (and frees the disk) before the new one starts.
+  replicas: 1
+  strategy:
+    type: Recreate
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: consigliere
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: consigliere
+        azure.workload.identity/use: "true" # inject the identity's token and AZURE_* variables
+    spec:
+      serviceAccountName: consigliere
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532 # distroless "nonroot"
+        runAsGroup: 65532
+        fsGroup: 65532 # the disk is group-owned, so the sync containers and the app can share it
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+
+      initContainers:
+        # Clone (or update) the private data pack before the app starts...
+        - name: datapack-clone
+          image: alpine/git:v2.52.0
+          command: [sh, /etc/datapack-sync/datapack-sync.sh]
+          env: &syncEnv
+            - name: REPO
+              valueFrom:
+                configMapKeyRef: { name: azure, key: DATA_PACK_REPO }
+            - { name: BRANCH, value: main }
+            - { name: DEST, value: /data/pack }
+            - { name: INTERVAL, value: "300" }
+            - { name: HOME, value: /tmp }
+          securityContext: &gitSecurity
+            runAsUser: 65534 # ssh needs a passwd entry; "nobody" has one in this image
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources: &gitResources
+            requests: { cpu: 10m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts: &gitMounts
+            - { name: data, mountPath: /data }
+            - { name: datapack-sync, mountPath: /etc/datapack-sync, readOnly: true }
+            - { name: datapack-key, mountPath: /mnt/datapack-key, readOnly: true }
+            - { name: git-tmp, mountPath: /tmp }
+        # ...then keep it current while it runs (a native sidecar), so pack edits land without a redeploy.
+        - name: datapack-sync
+          image: alpine/git:v2.52.0
+          restartPolicy: Always
+          command: [sh, /etc/datapack-sync/datapack-sync.sh, --loop]
+          env: *syncEnv
+          securityContext: *gitSecurity
+          resources: *gitResources
+          volumeMounts: *gitMounts
+
+      containers:
+        - name: consigliere
+          image: consigliere # replaced from azure.env
+          args: [--secrets, /mnt/secrets/secrets.json]
+          env:
+            - { name: DataPack__Path, value: /data/pack }
+            # Reachable only through port-forward (no ingress); the sign-in token comes from the secrets file.
+            - { name: Web__Listen, value: "0.0.0.0:8080" }
+          envFrom:
+            - configMapRef: { name: azure }
+          ports:
+            - { name: http, containerPort: 8080 }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: [ALL] }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: secrets, mountPath: /mnt/secrets, readOnly: true }
+            - { name: tmp, mountPath: /tmp } # backup snapshots before upload
+
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: consigliere-data }
+        - name: secrets
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: consigliere-app }
+        - name: datapack-key
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: consigliere-datapack }
+        - name: datapack-sync
+          configMap: { name: datapack-sync }
+        - name: tmp
+          emptyDir: { sizeLimit: 1Gi }
+        - name: git-tmp
+          emptyDir: { sizeLimit: 64Mi }

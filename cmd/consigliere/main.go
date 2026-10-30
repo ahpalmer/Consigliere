@@ -22,6 +22,7 @@ import (
 	_ "time/tzdata" // IANA zones work on Windows and in minimal containers
 
 	"github.com/ahpalmer/consigliere/internal/agent"
+	"github.com/ahpalmer/consigliere/internal/backup"
 	"github.com/ahpalmer/consigliere/internal/channel"
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/config"
@@ -129,7 +130,8 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		Scorer: radar.LLMScorer{LLM: llmClient, Model: scoreModel, Owner: cfg.Agent.OwnerName, Pack: pack, Config: radarCfg, Clock: clk}}
 	digest := &radar.Digest{DB: db, Ranking: ranking, Clock: clk, MaxItems: cfg.Radar.DigestMaxItems, MinScore: cfg.Radar.DigestMinScore}
 	feedback := &radar.Feedback{DB: db, Clock: clk}
-	radarCommands := &radar.Commands{DB: db, Scanner: scanner, Scoring: scoring, Digest: digest, Feedback: feedback, Config: radarCfg, Clock: clk,
+	catalog := &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: cfg.Radar.DigestMinScore}
+	radarCommands := &radar.Commands{DB: db, Scanner: scanner, Scoring: scoring, Digest: digest, Feedback: feedback, Catalog: catalog, Config: radarCfg, Clock: clk,
 		Tasks: tasks, Channel: sender, ItemButtons: itemButtons}
 
 	// Pipeline: active → waiting → completed, with the apply kit.
@@ -150,6 +152,15 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 			&radar.ScoreJob{Scoring: scoring, Cron: cfg.Radar.ScoreCron},
 			&pipeline.Briefing{Pipeline: pipe, Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
 		}}
+	// Backups run where there's somewhere to put them: in AKS, signed in as the pod's workload identity.
+	if cfg.Backup.ContainerUrl != "" {
+		identity, err := backup.WorkloadIdentityFromEnv()
+		if err != nil {
+			return err
+		}
+		sched.Jobs = append(sched.Jobs, &backup.Job{DB: db, Blobs: &backup.BlobContainer{URL: cfg.Backup.ContainerUrl, Tokens: identity},
+			Clock: clk, Cron: cfg.Backup.Cron})
+	}
 
 	// The dashboard is optional: an empty Web:Listen turns it off.
 	var dashboard *web.Server
@@ -158,8 +169,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 			return err
 		}
 		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Feedback: feedback,
-			Catalog: &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: cfg.Radar.DigestMinScore},
-			Scoring: scoring, State: state, Usage: usage, Clock: clk}
+			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk}
 	}
 
 	// Run until Ctrl+C / SIGTERM, then stop in order: polling, scheduling and the dashboard first, then background

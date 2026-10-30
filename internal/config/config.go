@@ -27,6 +27,7 @@ type Config struct {
 	Scheduler Scheduler
 	Mail      Mail
 	Web       Web
+	Backup    Backup
 }
 
 type DataPack struct {
@@ -87,6 +88,13 @@ type Web struct {
 	Token string
 }
 
+// Backup copies the database to blob storage. Off unless ContainerUrl is set (in AKS, where the pod's workload
+// identity can write to the container).
+type Backup struct {
+	Cron         string
+	ContainerUrl string // e.g. https://<account>.blob.core.windows.net/backups
+}
+
 type Mail struct {
 	ClientId, ClientSecret string
 	// Written by `consigliere auth gmail`.
@@ -143,6 +151,7 @@ func defaults() map[string]any {
 		"Pipeline":  map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30},
 		"Scheduler": map[string]any{"TimeZone": "America/New_York"},
 		"Web":       map[string]any{"Listen": "127.0.0.1:8080"},
+		"Backup":    map[string]any{"Cron": "30 3 * * *"},
 		"Mail": map[string]any{
 			"Query": "newer_than:14d", "MaxMessagesPerScan": 50,
 			"AllowedSenderDomains": []any{"linkedin.com", "indeed.com", "glassdoor.com", "wellfound.com", "ziprecruiter.com", "dice.com", "builtin.com"},

@@ -1,0 +1,13 @@
+# Cluster-internal only, for `kubectl port-forward svc/consigliere 8080`. Nothing is exposed outside the cluster.
+apiVersion: v1
+kind: Service
+metadata:
+  name: consigliere
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: consigliere
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http

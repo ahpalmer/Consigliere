@@ -1,0 +1,10 @@
+# Only what the image build needs; everything else (including any stray data or secrets) stays out of the context.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!config/
+!web/
+web/node_modules/
+internal/web/dist/

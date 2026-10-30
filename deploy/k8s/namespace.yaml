@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: consigliere
+  labels:
+    # Every pod here must run non-root, without privilege escalation, with all capabilities dropped.
+    pod-security.kubernetes.io/enforce: restricted
+    pod-security.kubernetes.io/enforce-version: latest

@@ -1,0 +1,62 @@
+name: deploy
+
+# Ships main to AKS once CI has passed on it, or on demand (Actions → deploy → Run workflow). Signs in to Azure over
+# OIDC as the GitHub identity from infra/ (no stored credentials). Until the repository variables in docs/deploy.md
+# are set it skips itself, so it never fails just because there's nothing to deploy to yet.
+on:
+  workflow_run:
+    workflows: [ci]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for the Azure sign-in
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Only pushes to this repository's main: a pull request from a fork whose branch is also called "main" must
+    # never reach the production credentials.
+    if: >-
+      vars.AZURE_CLIENT_ID != '' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository))
+    runs-on: ubuntu-latest
+    environment: production
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+      RG: rg-consigliere
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push the image
+        run: |
+          registry=$(az deployment group show -g "$RG" -n consigliere --query properties.outputs.acrLoginServer.value -o tsv)
+          az acr login -n "${registry%%.*}"
+          docker build -t "$registry/consigliere:$SHA" .
+          docker push "$registry/consigliere:$SHA"
+
+      - name: Connect to the cluster
+        run: |
+          sudo az aks install-cli --only-show-errors
+          az aks get-credentials -g "$RG" -n aks-consigliere --overwrite-existing
+          kubelogin convert-kubeconfig -l azurecli
+
+      - name: Deploy
+        env:
+          DATA_PACK_REPO: ${{ vars.DATA_PACK_REPO }}
+        run: bash deploy/deploy.sh "$SHA"

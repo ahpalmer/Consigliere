@@ -7,7 +7,7 @@ that should be predictable.
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
-    browser([Browser on the tailnet]) -. dashboard, signed in .-> host
+    browser([Browser via kubectl port-forward]) -. dashboard, signed in .-> host
     subgraph AKS["AKS (single replica, no ingress)"]
         host[cmd/consigliere<br/>receiver + scheduler + dashboard]
         host --> router[router<br/>slash commands]
@@ -30,8 +30,8 @@ flowchart LR
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
 - **Minimal attack surface.** Telegram uses long-polling (outbound only), and only allowlisted chat IDs are answered.
-  The one listener is the dashboard: loopback by default, reachable from the cluster only over a private tailnet, and
-  behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
+  The one listener is the dashboard: loopback by default, reachable in the cluster only through `kubectl port-forward` (no
+  ingress), and behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
 - **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to a tiny container), the official
   Anthropic and Google SDKs, a ~150-line Telegram Bot API client instead of a framework, and a dashboard that's just
   React, React Router and hand-written CSS.
@@ -52,6 +52,9 @@ flowchart LR
 | `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
 | `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
+| `internal/backup` | Nightly database copy to blob storage, signed in with the pod's workload identity |
+| `infra` | Bicep: AKS, container registry, Key Vault, backup storage, identities, role assignments, budget |
+| `deploy`, `Dockerfile` | The container image, Kustomize manifests for AKS, and the deploy, secrets and restore scripts |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
 
 ## Run locally
@@ -81,7 +84,7 @@ Restart and chat. To use a real data pack, set `DataPack:Path` (relative to the 
 The dashboard is at http://127.0.0.1:8080 once the app is built (Node 22+): `cd web && npm ci && npm run build`, then
 restart. See [docs/dashboard.md](docs/dashboard.md) for hot reload, sign-in and private access from the cluster.
 
-Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/options [reset]`
+Commands: `/status`, `/pause`, `/resume`, `/reset`, `/help`, plus Radar's `/scan`, `/score`, `/options [reset | <company>]`
 (alias `/digest`), `/item <id>`, `/good <id>`, `/bad <id>`, `/sources`, and the pipeline's `/active`, `/waiting`,
 `/completed`, `/activate`, `/applied`, `/interview`, `/followedup`, `/done`, `/note`, `/complete`, `/reopen`,
 `/kit`, `/prep`, `/thanks` (`/help` describes each).
@@ -97,6 +100,11 @@ The pipeline is a short list, not a firehose: 🎯 on an alert (or `/activate`) 
 export, read locally), people-search links you open yourself, veteran networks, a one-page DOCX that only selects
 and orders your existing bullets (unknown or unreviewed ids are rejected), and outreach drafts. At 08:00 a morning
 briefing lists the day's to-dos, then the best new options. Nothing is ever sent or submitted on your behalf.
+
+## Run in Azure
+
+The agent runs on a one-node AKS cluster, and `infra/`, `deploy/k8s/` and the `deploy` workflow describe all of it. A push
+to `main` that passes CI deploys itself, signing in to Azure over OIDC. See [docs/deploy.md](docs/deploy.md).
 
 ## Develop
 
@@ -114,7 +122,7 @@ cd web && npm run typecheck && npm test   # dashboard
 - [x] M2: Radar ingestion (public ATS JSON feeds), SQLite, dedupe, rule filter, scheduler
 - [x] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
 - [x] M4: read-only ingestion from a dedicated forwarding inbox ([docs/mail.md](docs/mail.md))
-- [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups
+- [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups ([docs/deploy.md](docs/deploy.md); written, first deploy pending)
 - [x] M6: pipeline (options → active → waiting → completed), apply kit, morning briefing
 - [ ] M7: application updates from email
 - [x] M8: React + TypeScript dashboard ([docs/dashboard.md](docs/dashboard.md))

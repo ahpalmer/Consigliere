@@ -1,0 +1,45 @@
+# Consigliere on AKS. deploy/deploy.sh writes azure.env (the image and the Azure names from the infra deployment's
+# outputs) and applies this with `kubectl apply -k deploy/k8s`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: consigliere
+
+resources:
+  - namespace.yaml
+  - storage.yaml
+  - identity.yaml
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  # Keys with "__" are app settings (e.g. Backup__ContainerUrl); the rest fill in the manifests below.
+  - name: azure
+    envs: [azure.env]
+  - name: datapack-sync
+    files: [datapack-sync.sh, known_hosts]
+
+replacements:
+  - source: { kind: ConfigMap, name: azure, fieldPath: data.IMAGE }
+    targets:
+      - select: { kind: Deployment, name: consigliere }
+        fieldPaths:
+          - spec.template.spec.containers.[name=consigliere].image
+  - source: { kind: ConfigMap, name: azure, fieldPath: data.APP_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: consigliere }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: azure, fieldPath: data.TENANT_ID }
+    targets:
+      - select: { kind: SecretProviderClass }
+        fieldPaths:
+          - spec.parameters.tenantId
+  - source: { kind: ConfigMap, name: azure, fieldPath: data.KEY_VAULT_NAME }
+    targets:
+      - select: { kind: SecretProviderClass }
+        fieldPaths:
+          - spec.parameters.keyvaultName

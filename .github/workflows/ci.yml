@@ -46,3 +46,23 @@ jobs:
 
       - name: Build (static linux binary with the dashboard embedded, as the container will run it)
         run: CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" -o bin/consigliere ./cmd/consigliere
+
+  # The deployment files, checked on every push so a broken one shows up here rather than mid-deploy.
+  deploy-files:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Bicep (compile and lint)
+        run: az bicep build --file infra/main.bicep --stdout > /dev/null
+
+      - name: Kubernetes manifests (render with example values)
+        run: |
+          cp deploy/k8s/azure.env.example deploy/k8s/azure.env
+          kubectl kustomize deploy/k8s > /dev/null
+
+      - name: Shell scripts
+        run: shellcheck deploy/*.sh deploy/k8s/datapack-sync.sh
+
+      - name: Container image
+        run: docker build -t consigliere:ci .

@@ -40,8 +40,8 @@ go run ./cmd/consigliere secrets set "Web:Token" "$(openssl rand -base64 32)"
 The dashboard can do everything the owner can (except send anything: there is still no submit or send tool), so it's
 built to be reachable only privately:
 
-- **Network.** Loopback by default. In AKS there's no ingress; reach it over the tailnet (Tailscale's Kubernetes operator,
-  or `kubectl port-forward` for a quick look), with `Web:Listen` set to `0.0.0.0:8080` and `Web:Token` from Key Vault.
+- **Network.** Loopback by default. In AKS there's no ingress: the manifest sets `Web:Listen` to `0.0.0.0:8080` inside the
+  pod, `Web:Token` comes from Key Vault, and you reach it with `kubectl port-forward` ([deploy.md](deploy.md)).
 - **Sign-in.** With a token set, every API call needs the session cookie (HttpOnly, SameSite=Strict, an HMAC derived from
   the token, so rotating the token signs everyone out) or `Authorization: Bearer <token>`. Wrong tokens cost a second.
 - **No token, loopback only.** Without a token the API also checks the `Host` header, so a web page that rebinds its

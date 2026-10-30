@@ -1,0 +1,43 @@
+# The pod's Azure identity (workload identity) and the Key Vault secrets it mounts. Each container gets only its own:
+# the app sees its secrets file, the data pack sync sees the deploy key.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: consigliere
+  annotations:
+    azure.workload.identity/client-id: APP_CLIENT_ID # replaced from azure.env
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: consigliere-app
+spec:
+  provider: azure
+  parameters:
+    clientID: APP_CLIENT_ID
+    tenantId: TENANT_ID
+    keyvaultName: KEY_VAULT_NAME
+    # The app's whole secrets file ("Section:Key" JSON, as on a laptop), pushed by deploy/push-secrets.sh.
+    objects: |
+      array:
+        - |
+          objectName: consigliere-secrets
+          objectType: secret
+          objectAlias: secrets.json
+---
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: consigliere-datapack
+spec:
+  provider: azure
+  parameters:
+    clientID: APP_CLIENT_ID
+    tenantId: TENANT_ID
+    keyvaultName: KEY_VAULT_NAME
+    objects: |
+      array:
+        - |
+          objectName: datapack-deploy-key
+          objectType: secret
+          objectAlias: deploy-key

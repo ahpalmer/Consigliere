@@ -32,6 +32,7 @@ type Option struct {
 
 type OptionsQuery struct {
 	Search         string // matched against title, company and locations
+	Company        string // matched against the company name only
 	Tier, Category string
 	MinScore       *int // nil: the catalog's default
 	Limit          int
@@ -63,6 +64,10 @@ func (c *Catalog) Options(ctx context.Context, q OptionsQuery) (OptionsPage, err
 		like := "%" + strings.ToLower(s) + "%"
 		where += ` AND (lower("Title") LIKE ? OR lower("Company") LIKE ? OR lower("Locations") LIKE ?)`
 		args = append(args, like, like, like)
+	}
+	if s := strings.TrimSpace(q.Company); s != "" {
+		where += ` AND lower("Company") LIKE ?`
+		args = append(args, "%"+strings.ToLower(s)+"%")
 	}
 	if q.Tier != "" {
 		where += ` AND lower(coalesce("Tier", '')) = ?`
