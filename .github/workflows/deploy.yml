@@ -1,8 +1,10 @@
 name: deploy
 
 # Ships main to AKS once CI has passed on it, or on demand (Actions → deploy → Run workflow). Signs in to Azure over
-# OIDC as the GitHub identity from infra/ (no stored credentials). Until the repository variables in docs/deploy.md
-# are set it skips itself, so it never fails just because there's nothing to deploy to yet.
+# OIDC as the GitHub identity from infra/ (no stored credentials). The Azure IDs are production environment secrets,
+# not because they grant access but so they're masked in this public repo's logs. Until the DEPLOY_ENABLED repository
+# variable is 'true' it skips itself, so it never fails just because there's nothing to deploy to yet (a job's `if`
+# can't read secrets).
 on:
   workflow_run:
     workflows: [ci]
@@ -23,7 +25,7 @@ jobs:
     # Only pushes to this repository's main: a pull request from a fork whose branch is also called "main" must
     # never reach the production credentials.
     if: >-
-      vars.AZURE_CLIENT_ID != '' && github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository))
@@ -39,9 +41,9 @@ jobs:
 
       - uses: azure/login@v2
         with:
-          client-id: ${{ vars.AZURE_CLIENT_ID }}
-          tenant-id: ${{ vars.AZURE_TENANT_ID }}
-          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build and push the image
         run: |
@@ -58,5 +60,5 @@ jobs:
 
       - name: Deploy
         env:
-          DATA_PACK_REPO: ${{ vars.DATA_PACK_REPO }}
+          DATA_PACK_REPO: ${{ secrets.DATA_PACK_REPO }}
         run: bash deploy/deploy.sh "$SHA"

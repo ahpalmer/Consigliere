@@ -113,9 +113,12 @@ Run these from the repo root in Git Bash, signed in to your **personal** Azure a
 6. **GitHub.** In the repository's Settings:
    - **Environments** → New environment `production`. Under *Deployment branches*, choose *Selected branches* and add
      `main`.
-   - **Secrets and variables → Actions → Variables**: add `AZURE_CLIENT_ID` (the `githubClientId` output),
-     `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `DATA_PACK_REPO` (the data pack's SSH clone URL,
-     `git@github.com:<you>/<repo>.git`). These are identifiers, not secrets.
+   - In the `production` environment, under **Environment secrets**, add `AZURE_CLIENT_ID` (the `githubClientId`
+     output), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `DATA_PACK_REPO` (the data pack's SSH clone URL,
+     `git@github.com:<you>/<repo>.git`). They're identifiers that grant nothing on their own, but as secrets they're
+     masked in the public repo's Actions logs.
+   - **Secrets and variables → Actions → Variables → New repository variable**: `DEPLOY_ENABLED` = `true`. This turns
+     on the deploy workflow (it skips itself until then).
 
 7. **First deploy.** Stop the agent on your laptop first: two copies polling one bot fight over every message. Then
    open Actions → deploy → Run workflow on `main`. From now on, every push to `main` that passes CI deploys itself.

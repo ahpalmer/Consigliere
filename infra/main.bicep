@@ -50,7 +50,7 @@ output resourceGroup string = rg.name
 output aksName string = resources.outputs.aksName
 output keyVaultName string = resources.outputs.keyVaultName
 output storageAccountName string = resources.outputs.storageAccountName
-// Repository variable AZURE_CLIENT_ID for the deploy workflow.
+// The production environment secret AZURE_CLIENT_ID for the deploy workflow.
 output githubClientId string = resources.outputs.githubClientId
 output tenantId string = tenant().tenantId
 output subscriptionId string = subscription().subscriptionId
