@@ -1,5 +1,6 @@
-# ats: greenhouse | lever | ashby
+# ats: greenhouse | lever | ashby | hn (the monthly HN "Who is hiring?" thread)
 # board: the token in the public board URL
 sources:
   - { name: GitLab, ats: greenhouse, board: gitlab }
   - { name: Linear, ats: ashby, board: linear }
+  - { name: HN Who is hiring, ats: hn, board: whoishiring }

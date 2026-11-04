@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"flag"
 	"fmt"
@@ -116,12 +117,18 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	if err != nil {
 		return err
 	}
+	pipe := &pipeline.Pipeline{DB: db, Clock: clk, Location: location,
+		SoftCap: cfg.Pipeline.ActiveSoftCap, FollowUpDays: cfg.Pipeline.FollowUpDays, GhostDays: cfg.Pipeline.GhostDays}
 	fetcher := radar.NewHTTPFetcher()
 	gmailBox := mail.NewGmail(cfg.Mail)
+	// Emails about the owner's applications update the pipeline (M7): received → waiting, interview → active, ...
+	mailUpdates := &pipeline.MailUpdates{Pipeline: pipe, Channel: sender}
+	mailSource := &mail.Source{DB: db, Mailbox: gmailBox, Reader: mail.LLMReader{LLM: llmClient}, Clock: clk,
+		Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains,
+		UpdateDomains: cfg.Mail.UpdateSenderDomains, BlockedSenders: cfg.Mail.BlockedSenders, Companies: mailUpdates.Companies, Updates: mailUpdates}
 	scanner := &radar.Scanner{DB: db, Config: radarCfg, Clock: clk, FetchConcurrency: 6, Sources: []radar.Source{
-		radar.Greenhouse{HTTP: fetcher}, radar.Lever{HTTP: fetcher}, radar.Ashby{HTTP: fetcher},
-		&mail.Source{DB: db, Mailbox: gmailBox, Extractor: mail.LLMExtractor{LLM: llmClient}, Clock: clk,
-			Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains},
+		radar.Greenhouse{HTTP: fetcher}, radar.Lever{HTTP: fetcher}, radar.Ashby{HTTP: fetcher}, radar.HackerNews{HTTP: fetcher},
+		mailSource,
 	}}
 	// Every item shown on its own gets 👍/👎 plus "🎯 Make active", which starts a pursuit.
 	itemButtons := func(id int64) []channel.Button { return append(radar.FeedbackButtons(id), pipeline.ActivateButton(id)) }
@@ -136,12 +143,14 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		Tasks: tasks, Channel: sender, ItemButtons: itemButtons}
 
 	// Pipeline: active → waiting → completed, with the apply kit.
-	pipe := &pipeline.Pipeline{DB: db, Clock: clk, Location: location,
-		SoftCap: cfg.Pipeline.ActiveSoftCap, FollowUpDays: cfg.Pipeline.FollowUpDays, GhostDays: cfg.Pipeline.GhostDays}
 	drafts := &pipeline.Drafts{Pipeline: pipe, Kit: &kit.Kit{Pack: pack, LLM: llmClient, Owner: cfg.Agent.OwnerName}, Tasks: tasks, State: state}
 	if err := drafts.Recover(ctx); err != nil {
 		return err
 	}
+	suggestions := &pipeline.Suggestions{Catalog: catalog, Pipeline: pipe, Drafts: drafts,
+		HighMinScore: cfg.Pipeline.SuggestHighScore, MediumMinScore: cfg.Pipeline.SuggestMediumScore,
+		MaxHigh: cfg.Pipeline.SuggestMaxHigh, MaxMedium: cfg.Pipeline.SuggestMaxMedium, PerCompany: cfg.Pipeline.SuggestPerCompany,
+		AutoPrepare: cfg.Pipeline.AutoPrepareKits, Cron: cfg.Pipeline.PrepareCron}
 	pipelineCommands := &pipeline.Commands{Pipeline: pipe, Drafts: drafts, Channel: sender, Files: sender, Tasks: tasks, State: state}
 	if len(cfg.Mail.MissingSettings()) == 0 {
 		pipelineCommands.Inbox = gmailBox // kits also land in the dedicated mailbox
@@ -154,8 +163,14 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		Jobs: []scheduler.Job{
 			&radar.ScanJob{Scanner: scanner, Scoring: scoring, Cron: cfg.Radar.ScanCron},
 			&radar.ScoreJob{Scoring: scoring, Cron: cfg.Radar.ScoreCron},
-			&pipeline.Briefing{Pipeline: pipe, Digest: digest, Channel: sender, Cron: cfg.Radar.DigestCron},
+			&pipeline.Briefing{Pipeline: pipe, Digest: digest, Suggestions: suggestions, Channel: sender, Cron: cfg.Radar.DigestCron},
 		}}
+	if cfg.Pipeline.AutoPrepareKits > 0 {
+		sched.Jobs = append(sched.Jobs, suggestions)
+	}
+	sched.Jobs = append(sched.Jobs,
+		&radar.TuningSummary{DB: db, Channel: sender, Clock: clk, Cron: cfg.Radar.TuningCron},
+		&pipeline.MonthlySummary{Pipeline: pipe, Channel: sender, Cron: cfg.Pipeline.SummaryCron})
 	// Backups run where there's somewhere to put them: in AKS, signed in as the pod's workload identity.
 	if cfg.Backup.ContainerUrl != "" {
 		identity, err := backup.WorkloadIdentityFromEnv()
@@ -172,7 +187,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		if err := web.CheckAddr(cfg.Web.Listen, cfg.Web.Token); err != nil {
 			return err
 		}
-		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Feedback: feedback,
+		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Suggestions: suggestions, Feedback: feedback,
 			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk}
 	}
 
@@ -187,6 +202,9 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	errs := make(chan error, len(services))
 	for _, run := range services {
 		go func() { errs <- run(runCtx) }()
+	}
+	if len(cfg.Mail.MissingSettings()) == 0 {
+		tasks.Go("mail-backfill", func(ctx context.Context) error { return backfillMail(ctx, db, mailSource, cfg.Mail, sender) })
 	}
 
 	var firstErr error
@@ -209,6 +227,29 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		slog.Warn("background work still running at exit")
 	}
 	return firstErr
+}
+
+// backfillMail reads older mail once for application updates (the mailbox may hold confirmations and interview
+// requests from before this version), then says what it found. A failure is retried on the next start.
+func backfillMail(ctx context.Context, db *sql.DB, src *mail.Source, cfg config.Mail, ch channel.Channel) error {
+	const key = "mail_backfill_v1"
+	if _, done, err := store.GetState(ctx, db, key); err != nil || done {
+		return err
+	}
+	notes, err := src.Backfill(ctx, cfg.BackfillQuery, cfg.BackfillMax)
+	if err != nil {
+		slog.Warn("mail backfill failed; will retry on the next start", "err", err)
+		return nil
+	}
+	if err := store.SetState(ctx, db, key, time.Now().UTC().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	slog.Info("mail backfill done", "updates", len(notes))
+	if len(notes) == 0 {
+		return nil
+	}
+	return ch.Notify(ctx, fmt.Sprintf("📬 Read older mail for application updates: %d found (%s). Each is in its pursuit's history; /waiting and /active show where things stand.",
+		len(notes), strings.Join(notes, ", ")))
 }
 
 func boolToInt(b bool) int {

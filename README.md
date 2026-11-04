@@ -44,10 +44,10 @@ flowchart LR
 | `internal/config` | Layered settings: `config/consigliere.json` → secrets file → `Section__Key` env vars |
 | `internal/llm` | Claude client: per-task models, structured output, chat with refusal fallback, usage, prompts |
 | `internal/store` | SQLite, embedded migrations, timestamp encoding |
-| `internal/radar` | Source watching: job boards, normalize, dedupe, filter, score, rank, alert, digest |
-| `internal/pipeline` | Pursuits: active → waiting → completed, per-pursuit checklist, nudges, morning briefing |
+| `internal/radar` | Source watching: job boards and HN's "Who is hiring?", normalize, dedupe, filter, score, rank, alert, digest, weekly scoring feedback |
+| `internal/pipeline` | Pursuits: active → waiting → completed, checklist, nudges, morning briefing, suggested applications, email updates, monthly summary |
 | `internal/kit` | Apply kit: contacts from your own export, people-search links, bullet-selected one-page DOCX, drafts |
-| `internal/mail` | Alert-email source (Gmail API + LLM extraction, URL-verified); puts apply kits in the same inbox (insert, never send) |
+| `internal/mail` | Mailbox source (Gmail API + LLM reading, URL-verified): alert listings and application updates; puts apply kits in the same inbox (insert, never send) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
 | `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
 | `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |
@@ -98,8 +98,12 @@ The pipeline is a short list, not a firehose: 🎯 on an alert (or `/activate`) 
 *waiting* with follow-up nudges at 7 and 14 days and a "ghosted?" check at 30; `/interview` brings it back to active;
 `/complete` files it with an outcome. `/kit` builds the apply kit: people you know there (from your own LinkedIn
 export, read locally), people-search links you open yourself, veteran networks, a one-page DOCX that only selects
-and orders your existing bullets (unknown or unreviewed ids are rejected), and outreach drafts. At 08:00 a morning
-briefing lists the day's to-dos, then the best new options. Nothing is ever sent or submitted on your behalf.
+and orders your existing bullets (unknown or unreviewed ids are rejected), outreach drafts, and drafted answers for
+the application form. The dashboard's Suggested page splits what's next into strong matches to make active and decent
+ones it prepares for you (resume, answers, a link to the form), a few each morning. Emails about your applications move
+pursuits along (received → waiting, interview → active) and propose offers and rejections for you to confirm. At 08:00
+a morning briefing lists the day's to-dos, then the best new options; Sundays bring a scoring-feedback summary and the
+1st a monthly pipeline summary. Nothing is ever sent or submitted on your behalf.
 
 ## Run in Azure
 
@@ -122,7 +126,7 @@ cd web && npm run typecheck && npm test   # dashboard
 - [x] M2: Radar ingestion (public ATS JSON feeds), SQLite, dedupe, rule filter, scheduler
 - [x] M3: LLM scoring with structured output + caching, tiered alerts, feedback buttons, dead-man's switch
 - [x] M4: read-only ingestion from a dedicated forwarding inbox ([docs/mail.md](docs/mail.md))
-- [ ] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups ([docs/deploy.md](docs/deploy.md); written, first deploy pending)
+- [x] M5: AKS in Bicep: single-replica Deployment + PVC, Key Vault via CSI + Workload Identity, GitHub Actions via OIDC, backups ([docs/deploy.md](docs/deploy.md))
 - [x] M6: pipeline (options → active → waiting → completed), apply kit, morning briefing
-- [ ] M7: application updates from email
-- [x] M8: React + TypeScript dashboard ([docs/dashboard.md](docs/dashboard.md))
+- [x] M7: application updates from email: received → waiting, interview → active, offers and rejections proposed ([docs/mail.md](docs/mail.md))
+- [x] M8: React + TypeScript dashboard ([docs/dashboard.md](docs/dashboard.md)), with suggested applications: prepared resume, answers and form link

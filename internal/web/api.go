@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/pipeline"
 	"github.com/ahpalmer/consigliere/internal/radar"
 )
@@ -69,6 +70,10 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/options", s.options)
 	mux.HandleFunc("GET /api/items/{id}", s.getItem)
 	mux.HandleFunc("PUT /api/items/{id}/feedback", s.feedback)
+
+	mux.HandleFunc("GET /api/suggestions", s.suggestions)
+	mux.HandleFunc("POST /api/items/{id}/kit", s.prepareKit)
+	mux.HandleFunc("POST /api/items/{id}/applied", s.appliedItem)
 }
 
 // --- JSON shapes ---
@@ -128,22 +133,27 @@ func (s *Server) pursuitJSON(p *pipeline.Pursuit) pursuitJSON {
 }
 
 type draftJSON struct {
-	ID         int64      `json:"id"`
-	PursuitID  *int64     `json:"pursuitId"`
-	ItemID     *int64     `json:"itemId"`
-	Kind       string     `json:"kind"`
-	Title      string     `json:"title"`
-	Status     string     `json:"status"`
-	Text       string     `json:"text"`
-	Error      string     `json:"error"`
-	FileName   string     `json:"fileName"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	FinishedAt *time.Time `json:"finishedAt"`
+	ID         int64        `json:"id"`
+	PursuitID  *int64       `json:"pursuitId"`
+	ItemID     *int64       `json:"itemId"`
+	Kind       string       `json:"kind"`
+	Title      string       `json:"title"`
+	Status     string       `json:"status"`
+	Text       string       `json:"text"`
+	Error      string       `json:"error"`
+	FileName   string       `json:"fileName"`
+	Answers    []kit.Answer `json:"answers"`
+	CreatedAt  time.Time    `json:"createdAt"`
+	FinishedAt *time.Time   `json:"finishedAt"`
 }
 
 func toDraftJSON(d pipeline.Draft) draftJSON {
+	answers := d.Answers
+	if answers == nil {
+		answers = []kit.Answer{}
+	}
 	return draftJSON{ID: d.ID, PursuitID: d.PursuitID, ItemID: d.ItemID, Kind: d.Kind, Title: d.Title, Status: d.Status, Text: d.Text,
-		Error: d.Error, FileName: d.FileName, CreatedAt: d.CreatedAt, FinishedAt: d.FinishedAt}
+		Error: d.Error, FileName: d.FileName, Answers: answers, CreatedAt: d.CreatedAt, FinishedAt: d.FinishedAt}
 }
 
 type pursuitRefJSON struct {
@@ -631,6 +641,79 @@ func (s *Server) feedback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]int{"feedback": body.Value})
+}
+
+type suggestionJSON struct {
+	optionJSON
+	ApplyURL string     `json:"applyUrl"`
+	Kit      *draftJSON `json:"kit"`
+}
+
+func (s *Server) suggestions(w http.ResponseWriter, r *http.Request) {
+	if s.Suggestions == nil {
+		writeError(w, http.StatusNotFound, "suggestions are off")
+		return
+	}
+	high, medium, err := s.Suggestions.List(r.Context())
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	applicant, err := s.Suggestions.Applicant()
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	convert := func(list []pipeline.Suggestion) []suggestionJSON {
+		out := []suggestionJSON{}
+		for _, sg := range list {
+			j := suggestionJSON{optionJSON: toOptionJSON(sg.Option, nil), ApplyURL: sg.ApplyURL}
+			if sg.Kit != nil {
+				k := toDraftJSON(*sg.Kit)
+				k.Text = "" // the kit's text is long; GET /api/drafts/{id} has it
+				j.Kit = &k
+			}
+			out = append(out, j)
+		}
+		return out
+	}
+	if applicant == nil {
+		applicant = []kit.Field{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"high": convert(high), "medium": convert(medium), "applicant": applicant,
+		"highMinScore": s.Suggestions.HighMinScore, "mediumMinScore": s.Suggestions.MediumMinScore})
+}
+
+func (s *Server) prepareKit(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.Suggestions == nil {
+		if ok {
+			writeError(w, http.StatusNotFound, "suggestions are off")
+		}
+		return
+	}
+	d, err := s.Suggestions.Prepare(r.Context(), id)
+	if err != nil {
+		actionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toDraftJSON(d))
+}
+
+func (s *Server) appliedItem(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok || s.Suggestions == nil {
+		if ok {
+			writeError(w, http.StatusNotFound, "suggestions are off")
+		}
+		return
+	}
+	p, err := s.Suggestions.AppliedItem(r.Context(), id)
+	if err != nil {
+		actionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, s.pursuitJSON(p))
 }
 
 // --- plumbing ---

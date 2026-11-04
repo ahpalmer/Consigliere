@@ -7,6 +7,7 @@ A React + TypeScript app (`web/`) served by the agent itself. `npm run build` wr
 |---|---|
 | Pipeline | To-dos (interviews, thank-yous, follow-ups, ghost checks, next steps), then Active / Waiting / Completed. Add a job the radar didn't find. |
 | Pursuit | Checklist (tick and untick), applied / followed up / interview / complete / reopen, notes, history, and drafts: apply kit (with the DOCX), prep pack, thank-you. |
+| Suggested | What to apply to next, from the options not in the pipeline yet. **Make these active**: strong matches (`Pipeline:SuggestHighScore`, priority companies counting their bonus) to work on by hand. **Ready to apply**: decent matches (`Pipeline:SuggestMediumScore`) where the application is prepared for you: a tailored resume to download, drafted answers (why this company, a short cover letter) and your standard details with copy buttons, and a link straight to the form (Lever's `/apply`, Ashby's `/application`, Greenhouse's form anchor). The best few are prepared every morning (`Pipeline:AutoPrepareKits` on `Pipeline:PrepareCron`); Prepare does any other. "I applied" moves it to Waiting. Forms can't be pre-filled from a link, and nothing is ever submitted for you. |
 | Options | Every scored job, ranked, with search and tier, category and score filters. Browsing doesn't mark anything as sent, so the Telegram digest is unaffected. |
 | Item | One posting: why it scored the way it did, the posting text, 👍/👎, Make active. |
 | Status | Kill switch, scoring backlog, Claude usage since start, last run of every source. |

@@ -3,6 +3,7 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -27,7 +28,8 @@ type Draft struct {
 	PursuitID, ItemID   *int64
 	Kind, Title, Status string
 	Text, Error         string
-	FileName            string // set when a file (the tailored resume) comes with it
+	FileName            string       // set when a file (the tailored resume) comes with it
+	Answers             []kit.Answer // a kit's drafted answers for the application form
 	CreatedAt           time.Time
 	FinishedAt          *time.Time
 }
@@ -61,12 +63,12 @@ func (d *Drafts) StartKit(ctx context.Context, p *Pursuit, itemID *int64, done D
 	if err != nil {
 		return Draft{}, err
 	}
-	return d.start(ctx, "kit", "Apply kit: "+job.Title+" · "+job.Company, p, itemID, done, func(ctx context.Context) (string, string, []byte, error) {
+	return d.start(ctx, "kit", "Apply kit: "+job.Title+" · "+job.Company, p, itemID, done, func(ctx context.Context) (written, error) {
 		result, err := d.Kit.Build(ctx, job)
 		if err != nil {
-			return "", "", nil, err
+			return written{}, err
 		}
-		return result.Text, result.FileName, result.File, nil
+		return written{result.Text, result.FileName, result.File, result.Answers}, nil
 	})
 }
 
@@ -80,9 +82,9 @@ func (d *Drafts) StartPrep(ctx context.Context, p *Pursuit, extra string, done D
 	if p.InterviewAt != nil {
 		notes = "Interview: " + p.InterviewAt.In(d.Pipeline.Location).Format(timeFormat) + "\n" + notes
 	}
-	return d.start(ctx, "prep", "Prep pack: "+p.Title+" · "+p.Company, p, p.ItemID, done, func(ctx context.Context) (string, string, []byte, error) {
+	return d.start(ctx, "prep", "Prep pack: "+p.Title+" · "+p.Company, p, p.ItemID, done, func(ctx context.Context) (written, error) {
 		text, err := d.Kit.Prep(ctx, job, notes)
-		return text, "", nil, err
+		return written{text: text}, err
 	})
 }
 
@@ -95,15 +97,22 @@ func (d *Drafts) StartThanks(ctx context.Context, p *Pursuit, details string, do
 	if err != nil {
 		return Draft{}, err
 	}
-	return d.start(ctx, "thanks", "Thank-you: "+p.Title+" · "+p.Company, p, p.ItemID, done, func(ctx context.Context) (string, string, []byte, error) {
+	return d.start(ctx, "thanks", "Thank-you: "+p.Title+" · "+p.Company, p, p.ItemID, done, func(ctx context.Context) (written, error) {
 		text, err := d.Kit.Thanks(ctx, job, details)
-		return text, "", nil, err
+		return written{text: text}, err
 	})
+}
+
+// written is what a draft's writer produced.
+type written struct {
+	text, fileName string
+	file           []byte
+	answers        []kit.Answer
 }
 
 // start records a pending draft, then writes it in the background under the app's lifetime.
 func (d *Drafts) start(ctx context.Context, kind, title string, p *Pursuit, itemID *int64, done Done,
-	write func(ctx context.Context) (text, fileName string, file []byte, err error)) (Draft, error) {
+	write func(ctx context.Context) (written, error)) (Draft, error) {
 	if d.State != nil && d.State.Paused() {
 		return Draft{}, ErrPaused
 	}
@@ -130,7 +139,7 @@ func (d *Drafts) start(ctx context.Context, kind, title string, p *Pursuit, item
 	}
 
 	d.Tasks.Go(kind, func(ctx context.Context) error {
-		text, fileName, file, werr := write(ctx)
+		out, werr := write(ctx)
 		if ctx.Err() != nil {
 			return nil // shutting down; Recover marks it failed on the next start
 		}
@@ -140,12 +149,19 @@ func (d *Drafts) start(ctx context.Context, kind, title string, p *Pursuit, item
 			_, err = d.Pipeline.DB.ExecContext(ctx, `UPDATE "Drafts" SET "Status" = 'failed', "Error" = ?, "FinishedAt" = ? WHERE "Id" = ?`,
 				werr.Error(), finished, id)
 		} else {
-			var name any
-			if file != nil {
-				name = fileName
+			var name, answers any
+			if out.file != nil {
+				name = out.fileName
 			}
-			_, err = d.Pipeline.DB.ExecContext(ctx, `UPDATE "Drafts" SET "Status" = 'ready', "Text" = ?, "FileName" = ?, "File" = ?, "FinishedAt" = ?
-				WHERE "Id" = ?`, text, name, file, finished, id)
+			if len(out.answers) > 0 {
+				raw, jerr := json.Marshal(out.answers)
+				if jerr != nil {
+					return jerr
+				}
+				answers = string(raw)
+			}
+			_, err = d.Pipeline.DB.ExecContext(ctx, `UPDATE "Drafts" SET "Status" = 'ready', "Text" = ?, "FileName" = ?, "File" = ?, "Answers" = ?,
+				"FinishedAt" = ? WHERE "Id" = ?`, out.text, name, out.file, answers, finished, id)
 		}
 		if err != nil {
 			return err
@@ -157,12 +173,12 @@ func (d *Drafts) start(ctx context.Context, kind, title string, p *Pursuit, item
 		if err != nil {
 			return err
 		}
-		return done(ctx, finishedDraft, file)
+		return done(ctx, finishedDraft, out.file)
 	})
 	return draft, nil
 }
 
-const draftColumns = `"Id", "PursuitId", "ItemId", "Kind", "Title", "Status", "Text", "Error", "FileName", "CreatedAt", "FinishedAt"`
+const draftColumns = `"Id", "PursuitId", "ItemId", "Kind", "Title", "Status", "Text", "Error", "FileName", "Answers", "CreatedAt", "FinishedAt"`
 
 func (d *Drafts) query(ctx context.Context, where string, args ...any) ([]Draft, error) {
 	rows, err := d.Pipeline.DB.QueryContext(ctx, `SELECT `+draftColumns+` FROM "Drafts" WHERE `+where, args...)
@@ -176,11 +192,17 @@ func (d *Drafts) query(ctx context.Context, where string, args ...any) ([]Draft,
 			dr                Draft
 			pursuitID, itemID sql.NullInt64
 			errText, fileName sql.NullString
+			answers           sql.NullString
 			created           string
 			finished          sql.NullString
 		)
-		if err := rows.Scan(&dr.ID, &pursuitID, &itemID, &dr.Kind, &dr.Title, &dr.Status, &dr.Text, &errText, &fileName, &created, &finished); err != nil {
+		if err := rows.Scan(&dr.ID, &pursuitID, &itemID, &dr.Kind, &dr.Title, &dr.Status, &dr.Text, &errText, &fileName, &answers, &created, &finished); err != nil {
 			return nil, err
+		}
+		if answers.Valid {
+			if err := json.Unmarshal([]byte(answers.String), &dr.Answers); err != nil {
+				return nil, fmt.Errorf("draft %d answers: %w", dr.ID, err)
+			}
 		}
 		if pursuitID.Valid {
 			dr.PursuitID = &pursuitID.Int64
@@ -217,6 +239,22 @@ func (d *Drafts) ForPursuit(ctx context.Context, p *Pursuit) ([]Draft, error) {
 		return d.query(ctx, `"PursuitId" = ? OR ("PursuitId" IS NULL AND "ItemId" = ?) ORDER BY "Id" DESC`, p.ID, *p.ItemID)
 	}
 	return d.query(ctx, `"PursuitId" = ? ORDER BY "Id" DESC`, p.ID)
+}
+
+// LatestKits maps radar item ids to their most recent apply kit, whatever its status.
+func (d *Drafts) LatestKits(ctx context.Context, itemIDs []int64) (map[int64]Draft, error) {
+	out := map[int64]Draft{}
+	if len(itemIDs) == 0 {
+		return out, nil
+	}
+	found, err := d.query(ctx, `"Kind" = 'kit' AND "ItemId" IN (`+store.Placeholders(len(itemIDs))+`) ORDER BY "Id"`, store.Args(itemIDs)...)
+	if err != nil {
+		return nil, err
+	}
+	for _, dr := range found { // later rows win
+		out[*dr.ItemID] = dr
+	}
+	return out, nil
 }
 
 // File returns a draft's attachment.

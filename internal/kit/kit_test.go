@@ -272,6 +272,8 @@ func TestBuildKit(t *testing.T) {
 		"gaps":             []string{},
 		"connection_note":  "Hi [Name], " + strings.Repeat("really ", 60) + "keen.",
 		"referral_request": "Hi [Name], would you refer me?",
+		"why_company":      "Google runs the fleets I want to work on.",
+		"cover_letter":     "Dear Hiring Team,\n\nI run fleets.\n\nSam",
 	})
 	fake := &fakeLLM{structured: string(draft)}
 	k := &Kit{Pack: pack, LLM: fake, Owner: "Sam"}
@@ -284,6 +286,10 @@ func TestBuildKit(t *testing.T) {
 		if !strings.Contains(result.Text, want) {
 			t.Errorf("kit text lacks %q:\n%s", want, result.Text)
 		}
+	}
+	if len(result.Answers) != 2 || result.Answers[0].Label != "Why Google?" || result.Answers[1].Label != "Cover letter" ||
+		!strings.Contains(result.Text, "Why Google?\nGoogle runs the fleets") {
+		t.Errorf("answers %+v", result.Answers)
 	}
 	if result.FileName != "Sam_Sample_Resume_-_Google.docx" {
 		t.Error(result.FileName)
@@ -329,5 +335,47 @@ func TestBuildKitWithoutOptionalFiles(t *testing.T) {
 	}
 	if result.File != nil || !strings.Contains(result.Text, "export as profile/connections.csv") || !strings.Contains(result.Text, "add profile/bullets.yaml") {
 		t.Fatal(result.Text)
+	}
+}
+
+func TestApplicantFieldsComeFromTheContactLineAndApplicationFile(t *testing.T) {
+	profile := strings.Replace(testProfile, `contact: "sam@example.com"`, `contact: "(555) 123-4567 · sam@example.com · linkedin.com/in/sam · github.com/sam · Raleigh, NC"`, 1)
+	pack := testPack(t, map[string]string{ProfilePath: profile, ApplicationPath: `
+fields:
+  - { label: Location, value: "Durham, NC" }
+  - { label: Need visa sponsorship, value: "No" }
+  - { label: Salary expectation, value: "" }
+`})
+	fields, err := Applicant(pack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	var labels []string
+	for _, f := range fields {
+		got[f.Label] = f.Value
+		labels = append(labels, f.Label)
+	}
+	want := map[string]string{"Full name": "Sam Sample", "First name": "Sam", "Last name": "Sample", "Phone": "(555) 123-4567",
+		"Email": "sam@example.com", "LinkedIn": "https://linkedin.com/in/sam", "GitHub": "https://github.com/sam",
+		"Location": "Durham, NC", "Need visa sponsorship": "No"}
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+	if _, ok := got["Salary expectation"]; ok || len(fields) != len(want) {
+		t.Errorf("fields %v", labels)
+	}
+}
+
+func TestSamplePackApplicationFileIsValid(t *testing.T) {
+	pack, err := datapack.Open("../../samples/data-pack")
+	if err != nil {
+		t.Fatal(err)
+	}
+	fields, err := Applicant(pack)
+	if err != nil || len(fields) < 5 {
+		t.Fatalf("%v %v", fields, err)
 	}
 }

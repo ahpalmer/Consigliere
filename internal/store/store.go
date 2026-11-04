@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"embed"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -186,4 +187,20 @@ func Args[T any](values []T) []any {
 		out[i] = v
 	}
 	return out
+}
+
+// GetState reads a value from the AppState table; ok=false when the key isn't set.
+func GetState(ctx context.Context, db *sql.DB, key string) (string, bool, error) {
+	var v string
+	err := db.QueryRowContext(ctx, `SELECT "Value" FROM "AppState" WHERE "Key" = ?`, key).Scan(&v)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	return v, err == nil, err
+}
+
+// SetState writes a value to the AppState table.
+func SetState(ctx context.Context, db *sql.DB, key, value string) error {
+	_, err := db.ExecContext(ctx, `INSERT INTO "AppState" ("Key", "Value") VALUES (?, ?) ON CONFLICT ("Key") DO UPDATE SET "Value" = excluded."Value"`, key, value)
+	return err
 }

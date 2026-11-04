@@ -25,16 +25,17 @@ import (
 var dist embed.FS
 
 type Server struct {
-	Addr     string
-	Token    string // empty: no sign-in, allowed on loopback only
-	Pipeline *pipeline.Pipeline
-	Drafts   *pipeline.Drafts
-	Catalog  *radar.Catalog
-	Feedback *radar.Feedback
-	Scoring  *radar.ScoringRunner
-	State    *agent.State
-	Usage    *llm.UsageTracker
-	Clock    clock.Clock
+	Addr        string
+	Token       string // empty: no sign-in, allowed on loopback only
+	Pipeline    *pipeline.Pipeline
+	Drafts      *pipeline.Drafts
+	Suggestions *pipeline.Suggestions
+	Catalog     *radar.Catalog
+	Feedback    *radar.Feedback
+	Scoring     *radar.ScoringRunner
+	State       *agent.State
+	Usage       *llm.UsageTracker
+	Clock       clock.Clock
 	// Overrides the embedded app (tests).
 	Assets fs.FS
 }

@@ -1,0 +1,10 @@
+# Standard answers for application forms. The dashboard shows them next to each prepared application with copy
+# buttons. Name, email, phone and links come from bullets.yaml's name and contact line; a field here with the same
+# label replaces that one. Empty values are skipped.
+fields:
+  - { label: Location, value: "Raleigh, NC" }
+  - { label: Authorized to work in the US, value: "Yes" }
+  - { label: Need visa sponsorship, value: "No" }
+  - { label: Willing to relocate, value: "Yes, for the right role" }
+  - { label: Earliest start date, value: "Two weeks after an offer" }
+  - { label: How did you hear about us, value: "" }

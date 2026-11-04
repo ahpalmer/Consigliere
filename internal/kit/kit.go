@@ -50,6 +50,13 @@ type Result struct {
 	Text     string
 	File     []byte // tailored resume (DOCX); nil when there's no profile/bullets.yaml
 	FileName string
+	Answers  []Answer // drafts for the application form's free-text questions
+}
+
+// Answer is a drafted reply to a common application question, for the owner to paste into the form.
+type Answer struct {
+	Label string `json:"label"`
+	Text  string `json:"text"`
 }
 
 // Build assembles the kit. Only the resume selection and the drafts use the model; everything else is lookup.
@@ -168,6 +175,12 @@ func (k *Kit) Build(ctx context.Context, job Job) (*Result, error) {
 	if strings.TrimSpace(draft.ReferralRequest) != "" {
 		sb.WriteString("\nReferral request:\n" + strings.TrimSpace(draft.ReferralRequest) + "\n")
 	}
+	for _, a := range []Answer{{"Why " + job.Company + "?", draft.WhyCompany}, {"Cover letter", draft.CoverLetter}} {
+		if text := strings.TrimSpace(a.Text); text != "" {
+			result.Answers = append(result.Answers, Answer{a.Label, text})
+			sb.WriteString("\n" + a.Label + "\n" + text + "\n")
+		}
+	}
 	writeList(&sb, "Notes", notes)
 	result.Text = strings.TrimSpace(sb.String())
 	return result, nil
@@ -182,6 +195,8 @@ type kitDraft struct {
 	Gaps            []string `json:"gaps"`
 	ConnectionNote  string   `json:"connection_note"`
 	ReferralRequest string   `json:"referral_request"`
+	WhyCompany      string   `json:"why_company"`
+	CoverLetter     string   `json:"cover_letter"`
 }
 
 func (d kitDraft) selection() Selection {
@@ -202,6 +217,8 @@ func (k *Kit) draft(ctx context.Context, job Job, profile *Profile, summary stri
 		"gaps":             map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 		"connection_note":  map[string]any{"type": "string"},
 		"referral_request": map[string]any{"type": "string"},
+		"why_company":      map[string]any{"type": "string"},
+		"cover_letter":     map[string]any{"type": "string"},
 	}
 	if profile != nil {
 		bank.WriteString("## Bullet bank\n")

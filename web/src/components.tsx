@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useState, type ReactNode } from "react";
 import type { Stage } from "./api";
 import { fitBand } from "./format";
 
@@ -56,5 +56,27 @@ export function Progress({ done, total }: { done: number; total: number }) {
     <div className="progress" role="progressbar" aria-valuemin={0} aria-valuemax={total} aria-valuenow={done}>
       <div className="progress-fill" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
     </div>
+  );
+}
+
+/** Copies text to the clipboard (the dashboard is served from localhost, which browsers allow). */
+export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  return (
+    <button
+      className="btn small"
+      type="button"
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setState("copied");
+        } catch {
+          setState("failed");
+        }
+        setTimeout(() => setState("idle"), 1500);
+      }}
+    >
+      {state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : label}
+    </button>
   );
 }

@@ -51,6 +51,12 @@ export interface Summary {
 
 export type DraftKind = "kit" | "prep" | "thanks";
 
+/** A drafted answer to an application question (why this company, cover letter). */
+export interface Answer {
+  label: string;
+  text: string;
+}
+
 export interface Draft {
   id: number;
   pursuitId: number | null;
@@ -61,6 +67,7 @@ export interface Draft {
   text: string;
   error: string;
   fileName: string;
+  answers: Answer[];
   createdAt: string;
   finishedAt: string | null;
 }
@@ -108,6 +115,26 @@ export interface OptionsPage {
   categories: string[];
   unscored: number;
   defaultMinScore: number;
+}
+
+/** An option to act on: high ones to make active, medium ones with a prepared application. */
+export interface Suggestion extends Option {
+  applyUrl: string;
+  kit: Draft | null;
+}
+
+/** A standard application-form answer (name, email, work authorization). */
+export interface ApplicantField {
+  label: string;
+  value: string;
+}
+
+export interface SuggestionsPage {
+  high: Suggestion[];
+  medium: Suggestion[];
+  applicant: ApplicantField[];
+  highMinScore: number;
+  mediumMinScore: number;
 }
 
 export interface Status {
@@ -206,4 +233,8 @@ export const api = {
   },
   item: (id: number) => get<{ item: Option; description: string }>(`/api/items/${id}`),
   feedback: (id: number, value: 1 | -1) => send<{ feedback: number }>("PUT", `/api/items/${id}/feedback`, { value }),
+
+  suggestions: () => get<SuggestionsPage>("/api/suggestions"),
+  prepareKit: (itemId: number) => send<Draft>("POST", `/api/items/${itemId}/kit`),
+  appliedItem: (itemId: number) => send<Pursuit>("POST", `/api/items/${itemId}/applied`),
 };

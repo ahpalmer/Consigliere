@@ -1055,3 +1055,108 @@ tr.failed td {
     display: none;
   }
 }
+
+/* Suggested: prepared applications */
+
+.apply-list {
+  list-style: none;
+  margin: 0.6rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.apply-card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  overflow: hidden;
+}
+
+.apply-card .option {
+  border-bottom: 0;
+}
+
+.apply-steps {
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  padding: 0.7rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.steps {
+  margin: 0;
+  padding-left: 1.4rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 1.6rem;
+}
+
+.steps li::marker {
+  color: var(--ink-3);
+  font-size: 0.85rem;
+}
+
+.answers {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.answers p {
+  margin: 0.3rem 0 0;
+  padding: 0.6rem 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.your-details {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.5rem 0.75rem;
+}
+
+.your-details summary {
+  cursor: pointer;
+  font-weight: 550;
+}
+
+.field-grid {
+  margin: 0.6rem 0 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: minmax(8rem, 14rem) minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+}
+
+.field-row dt {
+  color: var(--ink-2);
+  font-size: 0.9rem;
+}
+
+.field-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 640px) {
+  .field-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .field-row dt {
+    grid-column: 1 / -1;
+  }
+}

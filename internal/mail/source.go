@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ahpalmer/consigliere/internal/clock"
@@ -16,85 +18,195 @@ import (
 )
 
 // Source is the Radar source over the dedicated mailbox (watchlist: { name: ..., ats: email, board: gmail }).
-// Each new message from an allowed sender is extracted once; listings whose URL doesn't appear in the email are
-// discarded.
+// Each new message from an allowed sender is read once: job listings become items (only those whose URL appears in
+// the email), and an update about one of the owner's applications goes to Updates.
+//
+// Allowed senders: job sites (AllowedDomains), application and scheduling systems (UpdateDomains), and companies
+// the owner is pursuing (a sender domain part equal to the company's name, e.g. careers.google.com for Google).
+// BlockedSenders (account-security mail) are never read, whatever the domain. A message skipped as "sender not
+// allowed" is checked again on later scans, so it's read once its sender becomes allowed (a new pursuit).
 type Source struct {
 	DB             *sql.DB
 	Mailbox        Mailbox
-	Extractor      Extractor
+	Reader         Reader
 	Clock          clock.Clock
 	Query          string
 	MaxMessages    int
 	AllowedDomains []string
+	UpdateDomains  []string
+	BlockedSenders []string
+	// Companies the owner is pursuing; nil when there's no pipeline.
+	Companies func(ctx context.Context) ([]string, error)
+	// Updates handles application updates; nil ignores them.
+	Updates UpdateHandler
+
+	mu sync.Mutex // the hourly scan and the one-time backfill never read the same mail at once
 }
+
+// UpdateHandler applies an application update (to the pipeline) and returns a short note for the record.
+type UpdateHandler interface {
+	HandleUpdate(ctx context.Context, u Update) (string, error)
+}
+
+const noteNotAllowed = "sender not allowed"
 
 func (s *Source) Kind() string       { return "email" }
 func (s *Source) IsAggregator() bool { return true }
 
 func (s *Source) Fetch(ctx context.Context, _ radar.WatchedSource) ([]radar.FetchedItem, error) {
-	ids, err := s.Mailbox.ListMessageIDs(ctx, s.Query, s.MaxMessages)
+	items, _, err := s.scan(ctx, s.Query, s.MaxMessages, false)
+	return items, err
+}
+
+// Backfill reads older mail once (e.g. "newer_than:180d") for application updates only: listings that old are
+// stale. Updates are recorded without alerts. Returns the handler's notes, for one summary message.
+func (s *Source) Backfill(ctx context.Context, query string, max int) ([]string, error) {
+	_, notes, err := s.scan(ctx, query, max, true)
+	return notes, err
+}
+
+func (s *Source) scan(ctx context.Context, query string, max int, backfill bool) ([]radar.FetchedItem, []string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids, err := s.Mailbox.ListMessageIDs(ctx, query, max)
 	if err != nil || len(ids) == 0 {
-		return nil, err
+		return nil, nil, err
 	}
-	processed := map[string]bool{}
-	rows, err := s.DB.QueryContext(ctx, `SELECT "Id" FROM "ProcessedMessages" WHERE "Mailbox" = ? AND "Id" IN (`+store.Placeholders(len(ids))+`)`,
-		append([]any{s.Mailbox.Name()}, store.Args(ids)...)...)
+	var companies []string
+	if s.Companies != nil {
+		if companies, err = s.Companies(ctx); err != nil {
+			return nil, nil, err
+		}
+	}
+	type seen struct{ from, note string }
+	processed := map[string]seen{}
+	rows, err := s.DB.QueryContext(ctx, `SELECT "Id", "From", coalesce("Note", '') FROM "ProcessedMessages" WHERE "Mailbox" = ? AND "Id" IN (`+
+		store.Placeholders(len(ids))+`)`, append([]any{s.Mailbox.Name()}, store.Args(ids)...)...)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	for rows.Next() {
 		var id string
-		if err := rows.Scan(&id); err != nil {
+		var p seen
+		if err := rows.Scan(&id, &p.from, &p.note); err != nil {
 			rows.Close()
-			return nil, err
+			return nil, nil, err
 		}
-		processed[id] = true
+		processed[id] = p
 	}
 	rows.Close()
 
-	var items []radar.FetchedItem
+	var messages []Message
 	for _, id := range ids {
-		if processed[id] {
+		if p, done := processed[id]; done && (p.note != noteNotAllowed || !s.allowed(p.from, companies)) {
 			continue
 		}
 		msg, err := s.Mailbox.Get(ctx, id)
 		if err != nil {
-			return items, err
+			return nil, nil, err
 		}
+		msg.ID = id
+		messages = append(messages, msg)
+	}
+	// Oldest first, so a "received" then a "rejection" for the same job are applied in that order.
+	slices.SortStableFunc(messages, func(a, b Message) int { return receivedAt(a).Compare(receivedAt(b)) })
+
+	var items []radar.FetchedItem
+	var notes []string
+	for _, msg := range messages {
 		count, note := 0, ""
 		switch {
 		case msg.Own:
 			note = "consigliere's own message"
-		case !AllowedSender(msg.From, s.AllowedDomains):
-			note = "sender not allowed"
+		case !s.allowed(msg.From, companies):
+			note = noteNotAllowed
 			slog.Info("skipping mail from a sender that isn't allowed", "from", msg.From)
 		default:
-			found, err := s.extract(ctx, msg)
+			found, update, err := s.read(ctx, msg)
 			if err != nil {
-				return items, err
+				return items, notes, err
 			}
-			items = append(items, found...)
-			count = len(found)
+			if !backfill {
+				items = append(items, found...)
+				count = len(found)
+			}
+			if update != nil && s.Updates != nil {
+				update.Backfill = backfill
+				if note, err = s.Updates.HandleUpdate(ctx, *update); err != nil {
+					return items, notes, err
+				}
+				if note != "" {
+					notes = append(notes, note)
+				}
+			}
 		}
 		// Recorded even when nothing was found, so the same message is never paid for twice.
-		if _, err := s.DB.ExecContext(ctx, `INSERT INTO "ProcessedMessages" ("Id", "Mailbox", "From", "Subject", "ReceivedAt", "ProcessedAt", "ItemCount", "Note")
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, id, s.Mailbox.Name(), msg.From, msg.Subject, store.FormatTimePtr(msg.ReceivedAt),
+		if _, err := s.DB.ExecContext(ctx, `INSERT OR REPLACE INTO "ProcessedMessages" ("Id", "Mailbox", "From", "Subject", "ReceivedAt", "ProcessedAt", "ItemCount", "Note")
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, msg.ID, s.Mailbox.Name(), msg.From, msg.Subject, store.FormatTimePtr(msg.ReceivedAt),
 			store.FormatTime(s.Clock.Now()), count, nullString(note)); err != nil {
-			return items, err
+			return items, notes, err
 		}
 	}
-	return items, nil
+	return items, notes, nil
 }
 
-func (s *Source) extract(ctx context.Context, msg Message) ([]radar.FetchedItem, error) {
+func receivedAt(m Message) time.Time {
+	if m.ReceivedAt == nil {
+		return time.Time{}
+	}
+	return *m.ReceivedAt
+}
+
+// allowed: not a blocked (account-security) sender, and from a job site, an application system, or a company
+// being pursued.
+func (s *Source) allowed(from string, companies []string) bool {
+	address := strings.ToLower(senderAddressOf(from))
+	for _, b := range s.BlockedSenders {
+		if b = strings.ToLower(strings.TrimSpace(b)); b != "" && strings.Contains(address, b) {
+			return false
+		}
+	}
+	return AllowedSender(from, s.AllowedDomains) || AllowedSender(from, s.UpdateDomains) || FromCompany(from, companies)
+}
+
+// FromCompany reports whether the sender's domain has a part equal to one of the companies' names with spaces and
+// punctuation removed: careers.google.com for "Google", redhat.com for "Red Hat", but not notgoogle.com.
+func FromCompany(from string, companies []string) bool {
+	address := senderAddressOf(from)
+	at := strings.LastIndex(address, "@")
+	if at < 0 {
+		return false
+	}
+	parts := strings.Split(strings.ToLower(address[at+1:]), ".")
+	for _, c := range companies {
+		name := strings.ReplaceAll(radar.NormalizeCompany(c), " ", "")
+		if len(name) >= 3 && slices.Contains(parts[:max(len(parts)-1, 0)], name) {
+			return true
+		}
+	}
+	return false
+}
+
+func senderAddressOf(from string) string {
+	if m := senderAddress.FindStringSubmatch(from); m != nil {
+		return m[1]
+	}
+	return strings.TrimSpace(from)
+}
+
+func (s *Source) read(ctx context.Context, msg Message) ([]radar.FetchedItem, *Update, error) {
 	text := ToText(msg.HTML, msg.Text)
 	urls := URLs(text)
-	listings, err := s.Extractor.Extract(ctx, fmt.Sprintf("From: %s\nSubject: %s\n\n%s", msg.From, msg.Subject, text))
+	received := ""
+	if msg.ReceivedAt != nil {
+		received = "Received: " + msg.ReceivedAt.Format(time.RFC1123Z) + "\n"
+	}
+	reading, err := s.Reader.Read(ctx, fmt.Sprintf("From: %s\nSubject: %s\n%s\n%s", msg.From, msg.Subject, received, text))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	var items []radar.FetchedItem
-	for _, l := range listings {
+	for _, l := range reading.Listings {
 		u := Canonicalize(l.URL)
 		if !urls[strings.ToLower(u)] || strings.TrimSpace(l.Title) == "" || strings.TrimSpace(l.Company) == "" {
 			slog.Warn("dropping extracted listing: URL not found in the email", "title", l.Title, "company", l.Company)
@@ -130,7 +242,20 @@ func (s *Source) extract(ctx context.Context, msg Message) ([]radar.FetchedItem,
 		}
 		items = append(items, item)
 	}
-	return items, nil
+
+	update := reading.Update
+	if update != nil {
+		var links []string
+		for _, l := range update.Links {
+			if u := Canonicalize(l); urls[strings.ToLower(u)] {
+				links = append(links, u)
+			}
+		}
+		update.Links = links
+		update.Company, update.Role = strings.TrimSpace(update.Company), strings.TrimSpace(update.Role)
+		update.MessageID, update.From, update.Subject, update.ReceivedAt = msg.ID, msg.From, msg.Subject, msg.ReceivedAt
+	}
+	return items, update, nil
 }
 
 func payLine(salary string) string {

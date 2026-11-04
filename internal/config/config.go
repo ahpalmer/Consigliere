@@ -57,7 +57,9 @@ type Telegram struct {
 }
 
 type Radar struct {
-	ScanCron, ScoreCron, DigestCron  string
+	ScanCron, ScoreCron, DigestCron string
+	// Weekly 👍/👎-versus-score summary, for tuning the scoring inputs.
+	TuningCron                       string
 	DigestMaxItems                   int
 	DigestMinScore, AlertMinScore    int
 	ScoreBatchSize, ScoreConcurrency int
@@ -72,6 +74,14 @@ type Pipeline struct {
 	FollowUpDays int
 	// Days of silence after applying before proposing "ghosted".
 	GhostDays int
+	// Suggested applications: ranked score floors for "make it active" (high) and "prepare it for me" (medium),
+	// list sizes, the cap per company, and how many medium ones get a kit prepared on PrepareCron.
+	SuggestHighScore, SuggestMediumScore int
+	SuggestMaxHigh, SuggestMaxMedium     int
+	SuggestPerCompany, AutoPrepareKits   int
+	PrepareCron                          string
+	// Monthly pipeline summary (counts and conversion), sent on this schedule.
+	SummaryCron string
 }
 
 type Scheduler struct {
@@ -98,10 +108,21 @@ type Backup struct {
 type Mail struct {
 	ClientId, ClientSecret string
 	// Written by `consigliere auth gmail`.
-	RefreshToken         string
-	Query                string
-	MaxMessagesPerScan   int
+	RefreshToken       string
+	Query              string
+	MaxMessagesPerScan int
+	// Gmail leaves Spam and Trash out of searches; redirected mail often lands in Spam, so include it (the query
+	// excludes Trash). Senders are still checked before anything is read.
+	IncludeSpam bool
+	// Job sites whose alerts become items.
 	AllowedSenderDomains []string
+	// Application and scheduling systems, read for updates about the owner's applications.
+	UpdateSenderDomains []string
+	// Never read, whatever the domain: account-security mail (sign-in codes, resets). Matched as substrings.
+	BlockedSenders []string
+	// One-time look back over older mail for application updates, the first time this version runs.
+	BackfillQuery string
+	BackfillMax   int
 }
 
 func (m Mail) MissingSettings() []string {
@@ -144,17 +165,26 @@ func defaults() map[string]any {
 			"MaxHistoryTurns": 20,
 		},
 		"Radar": map[string]any{
-			"ScanCron": "0 * * * *", "ScoreCron": "*/15 * * * *", "DigestCron": "0 8 * * *",
+			"ScanCron": "0 * * * *", "ScoreCron": "*/15 * * * *", "DigestCron": "0 8 * * *", "TuningCron": "0 18 * * 0",
 			"DigestMaxItems": 25, "DigestMinScore": 50, "AlertMinScore": 75, "ScoreBatchSize": 200, "ScoreConcurrency": 8,
 			"DatabasePath": "db/consigliere.db",
 		},
-		"Pipeline":  map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30},
+		"Pipeline": map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30,
+			"SuggestHighScore": 80, "SuggestMediumScore": 60, "SuggestMaxHigh": 10, "SuggestMaxMedium": 20, "SuggestPerCompany": 2,
+			"AutoPrepareKits": 5, "PrepareCron": "30 7 * * *", "SummaryCron": "0 9 1 * *"},
 		"Scheduler": map[string]any{"TimeZone": "America/New_York"},
 		"Web":       map[string]any{"Listen": "127.0.0.1:8080"},
 		"Backup":    map[string]any{"Cron": "30 3 * * *"},
 		"Mail": map[string]any{
-			"Query": "newer_than:14d", "MaxMessagesPerScan": 50,
+			"Query": "newer_than:14d -in:trash", "MaxMessagesPerScan": 100, "IncludeSpam": true,
 			"AllowedSenderDomains": []any{"linkedin.com", "indeed.com", "glassdoor.com", "wellfound.com", "ziprecruiter.com", "dice.com", "builtin.com"},
+			"UpdateSenderDomains": []any{"greenhouse.io", "greenhouse-mail.io", "lever.co", "ashbyhq.com", "myworkday.com", "workday.com",
+				"icims.com", "smartrecruiters.com", "jobvite.com", "taleo.net", "successfactors.com", "workablemail.com", "workable.com",
+				"bamboohr.com", "rippling.com", "calendly.com", "goodtime.io", "gem.com", "paradox.ai", "hirevue.com", "codesignal.com",
+				"hackerrank.com", "karat.com", "coderpad.io", "eightfold.ai"},
+			"BlockedSenders": []any{"accounts.google.com", "accountprotection.microsoft.com", "account.microsoft.com", "security-noreply",
+				"security@", "account-security", "noreply@github.com", "notifications@github.com", "payments-noreply", "googleplay-noreply"},
+			"BackfillQuery": "newer_than:180d -in:trash", "BackfillMax": 500,
 		},
 	}
 }

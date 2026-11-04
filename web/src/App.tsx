@@ -8,6 +8,7 @@ import { Login } from "./pages/Login";
 import { Options } from "./pages/Options";
 import { PursuitPage } from "./pages/PursuitPage";
 import { StatusPage } from "./pages/StatusPage";
+import { Suggested } from "./pages/Suggested";
 
 type Gate = "checking" | "signed-in" | "signed-out" | "offline";
 
@@ -61,6 +62,7 @@ export function App() {
             <NavLink to="/" end>
               Pipeline
             </NavLink>
+            <NavLink to="/suggested">Suggested</NavLink>
             <NavLink to="/options">Options</NavLink>
             <NavLink to="/status">Status</NavLink>
           </nav>
@@ -81,6 +83,7 @@ export function App() {
         <Routes>
           <Route path="/" element={<Board />} />
           <Route path="/pursuits/:id" element={<PursuitPage />} />
+          <Route path="/suggested" element={<Suggested />} />
           <Route path="/options" element={<Options />} />
           <Route path="/items/:id" element={<ItemPage />} />
           <Route path="/status" element={<StatusPage />} />

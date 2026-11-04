@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -25,7 +26,9 @@ import (
 
 type fakeLLM struct{}
 
-func (fakeLLM) Structured(context.Context, llm.StructuredRequest) (string, error) { return "{}", nil }
+func (fakeLLM) Structured(context.Context, llm.StructuredRequest) (string, error) {
+	return `{"why_company":"Acme runs the fleets I want to work on.","cover_letter":"Dear Hiring Team,\n\nI run fleets.\n\nSam"}`, nil
+}
 func (fakeLLM) Generate(_ context.Context, req llm.GenerateRequest) (string, error) {
 	return "Likely questions: tell me about a fleet rollout.", nil
 }
@@ -70,9 +73,11 @@ Go services', 'remote', ?)`,
 	pl := &pipeline.Pipeline{DB: db, Clock: clk, Location: location, SoftCap: 10, FollowUpDays: 7, GhostDays: 30}
 	radarCfg := radar.ConfigLoader{Pack: pack}
 	ranking := radar.RankingFactory{Config: radarCfg}
-	s := &Server{Token: token, Pipeline: pl, State: state, Clock: clk,
-		Drafts:   &pipeline.Drafts{Pipeline: pl, Kit: &kit.Kit{Pack: pack, LLM: fakeLLM{}, Owner: "Sam"}, Tasks: tasks, State: state},
-		Catalog:  &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: 50},
+	drafts := &pipeline.Drafts{Pipeline: pl, Kit: &kit.Kit{Pack: pack, LLM: fakeLLM{}, Owner: "Sam"}, Tasks: tasks, State: state}
+	catalog := &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: 50}
+	s := &Server{Token: token, Pipeline: pl, State: state, Clock: clk, Drafts: drafts, Catalog: catalog,
+		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 80, MediumMinScore: 60,
+			MaxHigh: 10, MaxMedium: 20, PerCompany: 2, AutoPrepare: 5},
 		Feedback: &radar.Feedback{DB: db, Clock: clk},
 		Usage:    llm.NewUsageTracker(),
 		Assets:   fstest.MapFS{"index.html": {Data: []byte("<!doctype html><div id=root></div>")}, "assets/app.js": {Data: []byte("1")}},
@@ -354,6 +359,54 @@ func TestAppRoutesFallBackToIndex(t *testing.T) {
 	}
 	if code := f.do("GET", "/api/nope", "", nil, "Authorization", "Bearer s3cret"); code != http.StatusNotFound {
 		t.Fatalf("unknown API route = %d", code)
+	}
+}
+
+func TestSuggestionsPrepareAndApply(t *testing.T) {
+	f := newFixture(t, "")
+	type page struct {
+		High, Medium []suggestionJSON
+		Applicant    []kit.Field
+	}
+	var got page
+	f.do("GET", "/api/suggestions", "", &got)
+	// Platform Engineer (88) is a strong match, SRE (72) a decent one, Sales Engineer (20) neither.
+	if len(got.High) != 1 || got.High[0].Title != "Platform Engineer" || len(got.Medium) != 1 || got.Medium[0].Title != "SRE" {
+		t.Fatalf("suggestions = %+v", got)
+	}
+	sre := got.Medium[0]
+	if sre.Kit != nil || sre.ApplyURL != sre.URL {
+		t.Fatalf("sre = %+v", sre)
+	}
+	if !slices.ContainsFunc(got.Applicant, func(f kit.Field) bool { return f.Label == "Email" && f.Value == "sam@example.com" }) {
+		t.Fatalf("applicant = %+v", got.Applicant)
+	}
+
+	var d draftJSON
+	if code := f.do("POST", "/api/items/"+itoa(sre.ID)+"/kit", "", &d); code != http.StatusAccepted || d.Status != "pending" {
+		t.Fatalf("prepare = %d %+v", code, d)
+	}
+	if !f.tasks.Wait(5 * time.Second) {
+		t.Fatal("kit still running")
+	}
+	f.do("GET", "/api/suggestions", "", &got)
+	k := got.Medium[0].Kit
+	if k == nil || k.Status != "ready" || k.FileName == "" || len(k.Answers) != 2 || k.Answers[0].Label != "Why Acme?" || k.Text != "" {
+		t.Fatalf("kit = %+v", k)
+	}
+	if code := f.do("GET", "/api/drafts/"+itoa(k.ID)+"/file", "", nil); code != http.StatusOK {
+		t.Fatalf("resume download = %d", code)
+	}
+
+	// Applying moves it into the pipeline (waiting), so it leaves the suggestions; 👎 drops one too.
+	var p pursuitJSON
+	if code := f.do("POST", "/api/items/"+itoa(sre.ID)+"/applied", "", &p); code != http.StatusOK || p.Stage != "waiting" || p.AppliedAt == nil {
+		t.Fatalf("applied = %d %+v", code, p)
+	}
+	f.do("PUT", "/api/items/"+itoa(got.High[0].ID)+"/feedback", `{"value":-1}`, nil)
+	f.do("GET", "/api/suggestions", "", &got)
+	if len(got.High) != 0 || len(got.Medium) != 0 {
+		t.Fatalf("after = %+v", got)
 	}
 }
 

@@ -7,7 +7,7 @@ from `DataPack:Path`.
 ```
 <data-pack>/
   profile/    who the owner is (see below)
-  radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll)
+  radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll: boards, the HN thread, alert email)
   db/         SQLite database (gitignored in the pack; backed up to blob storage)
 ```
 
@@ -19,6 +19,7 @@ from `DataPack:Path`.
 | `wins.md` | the owner | Raw log of wins; source material for bullets and stories |
 | `networks.yaml` | `/kit` | Veteran groups per company, plus general programs |
 | `connections.csv` | `/kit` | LinkedIn's Connections export, unmodified. Read locally to list people you know at a company; never sent to the model. |
+| `application.yaml` | Suggested page | Standard answers for application forms (work authorization, start date, ...), shown with copy buttons. Name, email, phone and links come from `bullets.yaml`'s contact line. |
 
 Scoring reads only `summary.md` and `resume.master.md` (or `about.md`), so editing stories or the bullet bank
 doesn't make every score stale.

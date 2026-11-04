@@ -74,7 +74,7 @@ func (g *Gmail) ListMessageIDs(ctx context.Context, query string, max int) ([]st
 	var ids []string
 	page := ""
 	for len(ids) < max {
-		call := svc.Users.Messages.List("me").Q(query).MaxResults(int64(min(100, max-len(ids)))).Context(ctx)
+		call := svc.Users.Messages.List("me").Q(query).IncludeSpamTrash(g.cfg.IncludeSpam).MaxResults(int64(min(100, max-len(ids)))).Context(ctx)
 		if page != "" {
 			call = call.PageToken(page)
 		}
