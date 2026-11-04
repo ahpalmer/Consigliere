@@ -2,11 +2,14 @@
 # Replaces the cluster's database with a local file: the laptop's database on first move to AKS, or a downloaded
 # backup. Stops the agent, swaps the file (keeping the old one as consigliere.db.before-restore), and starts it again.
 #
-#   deploy/restore-db.sh <file.db>      (a relative path: kubectl cp misreads "C:\..." as a pod name)
+#   deploy/restore-db.sh <file.db>
 set -euo pipefail
 
 file=${1:?usage: deploy/restore-db.sh <file.db>}
 [[ -f $file ]] || { echo "no such file: $file" >&2; exit 1; }
+# kubectl cp reads "C:/..." as a pod named C, so copy by bare name from the file's folder.
+cd "$(dirname "$file")"
+file=$(basename "$file")
 k() { kubectl -n consigliere "$@"; }
 
 k scale deployment/consigliere --replicas=0

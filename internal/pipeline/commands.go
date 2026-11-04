@@ -22,8 +22,14 @@ type Commands struct {
 	Drafts   *Drafts
 	Channel  channel.Channel
 	Files    channel.FileSender
+	Inbox    Inbox // nil: kits go to chat only
 	Tasks    *agent.Tasks
 	State    *agent.State
+}
+
+// Inbox also receives each finished kit, e.g. the owner's mailbox.
+type Inbox interface {
+	Deliver(ctx context.Context, subject, text, fileName string, file []byte) error
 }
 
 func (c *Commands) Commands() []commands.Info {
@@ -253,11 +259,24 @@ func (c *Commands) sendKit(ctx context.Context, d Draft, file []byte) error {
 	if d.Status != DraftReady {
 		return c.Channel.Notify(ctx, "⚠ The kit failed: "+d.Error)
 	}
+	const caption = "Tailored resume. Review before sending."
 	if err := c.Channel.Notify(ctx, d.Text); err != nil {
 		return err
 	}
 	if file != nil && c.Files != nil {
-		return c.Files.SendFile(ctx, d.FileName, file, "Tailored resume. Review before sending.")
+		if err := c.Files.SendFile(ctx, d.FileName, file, caption); err != nil {
+			return err
+		}
+	}
+	if c.Inbox == nil {
+		return nil
+	}
+	text := d.Text
+	if file != nil {
+		text += "\n\nAttached: " + caption
+	}
+	if err := c.Inbox.Deliver(ctx, d.Title, text, d.FileName, file); err != nil {
+		return c.Channel.Notify(ctx, "⚠ The kit didn't reach your inbox: "+err.Error())
 	}
 	return nil
 }

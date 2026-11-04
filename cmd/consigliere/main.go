@@ -117,9 +117,10 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		return err
 	}
 	fetcher := radar.NewHTTPFetcher()
+	gmailBox := mail.NewGmail(cfg.Mail)
 	scanner := &radar.Scanner{DB: db, Config: radarCfg, Clock: clk, FetchConcurrency: 6, Sources: []radar.Source{
 		radar.Greenhouse{HTTP: fetcher}, radar.Lever{HTTP: fetcher}, radar.Ashby{HTTP: fetcher},
-		&mail.Source{DB: db, Mailbox: mail.NewGmail(cfg.Mail), Extractor: mail.LLMExtractor{LLM: llmClient}, Clock: clk,
+		&mail.Source{DB: db, Mailbox: gmailBox, Extractor: mail.LLMExtractor{LLM: llmClient}, Clock: clk,
 			Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains},
 	}}
 	// Every item shown on its own gets 👍/👎 plus "🎯 Make active", which starts a pursuit.
@@ -142,6 +143,9 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		return err
 	}
 	pipelineCommands := &pipeline.Commands{Pipeline: pipe, Drafts: drafts, Channel: sender, Files: sender, Tasks: tasks, State: state}
+	if len(cfg.Mail.MissingSettings()) == 0 {
+		pipelineCommands.Inbox = gmailBox // kits also land in the dedicated mailbox
+	}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
 	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands, pipelineCommands),

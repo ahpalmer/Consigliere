@@ -62,10 +62,13 @@ func (s *Source) Fetch(ctx context.Context, _ radar.WatchedSource) ([]radar.Fetc
 			return items, err
 		}
 		count, note := 0, ""
-		if !AllowedSender(msg.From, s.AllowedDomains) {
+		switch {
+		case msg.Own:
+			note = "consigliere's own message"
+		case !AllowedSender(msg.From, s.AllowedDomains):
 			note = "sender not allowed"
 			slog.Info("skipping mail from a sender that isn't allowed", "from", msg.From)
-		} else {
+		default:
 			found, err := s.extract(ctx, msg)
 			if err != nil {
 				return items, err

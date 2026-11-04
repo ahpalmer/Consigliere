@@ -20,6 +20,7 @@ type Message struct {
 	ID, From, Subject string
 	ReceivedAt        *time.Time
 	HTML, Text        string
+	Own               bool // put there by Consigliere itself (Gmail.Deliver)
 }
 
 type Mailbox interface {
@@ -28,8 +29,9 @@ type Mailbox interface {
 	Get(ctx context.Context, id string) (Message, error)
 }
 
-// Scopes is read-only Gmail access, to the dedicated forwarding mailbox only.
-var Scopes = []string{gmail.GmailReadonlyScope}
+// Scopes is Gmail access to the dedicated forwarding mailbox only: read it, and add messages to it (kits, see
+// Deliver). Neither can send mail.
+var Scopes = []string{gmail.GmailReadonlyScope, gmail.GmailInsertScope}
 
 func OAuthConfig(cfg config.Mail) *oauth2.Config {
 	return &oauth2.Config{ClientID: cfg.ClientId, ClientSecret: cfg.ClientSecret, Endpoint: google.Endpoint, Scopes: Scopes}
@@ -110,7 +112,8 @@ func (g *Gmail) Get(ctx context.Context, id string) (Message, error) {
 		}
 		return ""
 	}
-	msg := Message{ID: id, From: header("From"), Subject: header("Subject"), HTML: findBody(m.Payload, "text/html"), Text: findBody(m.Payload, "text/plain")}
+	msg := Message{ID: id, From: header("From"), Subject: header("Subject"), HTML: findBody(m.Payload, "text/html"), Text: findBody(m.Payload, "text/plain"),
+		Own: header(ownHeader) != ""}
 	if m.InternalDate > 0 {
 		t := time.UnixMilli(m.InternalDate).UTC()
 		msg.ReceivedAt = &t

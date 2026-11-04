@@ -135,7 +135,7 @@ Run these from the repo root in Git Bash, signed in to your **personal** Azure a
 | To | Do |
 |---|---|
 | Ship a change | Push to `main`. CI runs, then `deploy` builds the image, applies `deploy/k8s` and waits for the pod. |
-| Open the dashboard | `kubectl -n consigliere port-forward svc/consigliere 8081:8080`, then http://localhost:8081 and sign in with `Web:Token`. |
+| Open the dashboard | `deploy/dashboard.ps1` (Windows): signs in if needed, opens the tunnel, copies `Web:Token` to the clipboard and opens the browser; Ctrl+C closes it. By hand: `kubectl -n consigliere port-forward svc/consigliere 8081:8080`, then http://localhost:8081 and sign in with `Web:Token`. |
 | Read logs | `kubectl -n consigliere logs deploy/consigliere` (add `-c datapack-sync` for the sync sidecar). |
 | Change the data pack | Push to the data pack repo; the pod picks it up within 5 minutes. |
 | Change a secret | `secrets set` locally, `bash deploy/push-secrets.sh <file>`, then `kubectl -n consigliere rollout restart deploy/consigliere`. |

@@ -17,8 +17,8 @@ import (
 	"github.com/ahpalmer/consigliere/internal/config"
 )
 
-// Authorize runs the one-time consent for the dedicated mailbox: it opens a browser, asks for read-only Gmail access
-// (desktop-app loopback flow with PKCE), and returns the refresh token. The caller saves it to secrets; in the cloud,
+// Authorize runs the one-time consent for the dedicated mailbox: it opens a browser, asks for the Gmail access in
+// Scopes (desktop-app loopback flow with PKCE), and returns the refresh token. The caller saves it to secrets; in the cloud,
 // copy it into Key Vault instead.
 func Authorize(ctx context.Context, cfg config.Mail, printf func(string, ...any)) (string, error) {
 	if cfg.ClientId == "" || cfg.ClientSecret == "" {

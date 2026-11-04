@@ -47,7 +47,7 @@ flowchart LR
 | `internal/radar` | Source watching: job boards, normalize, dedupe, filter, score, rank, alert, digest |
 | `internal/pipeline` | Pursuits: active → waiting → completed, per-pursuit checklist, nudges, morning briefing |
 | `internal/kit` | Apply kit: contacts from your own export, people-search links, bullet-selected one-page DOCX, drafts |
-| `internal/mail` | Read-only alert-email source (Gmail API + LLM extraction, URL-verified) |
+| `internal/mail` | Alert-email source (Gmail API + LLM extraction, URL-verified); puts apply kits in the same inbox (insert, never send) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
 | `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
 | `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |

@@ -12,7 +12,7 @@ param resourceGroupName string = 'rg-consigliere'
 @description('Object ID of the owner (az ad signed-in-user show --query id -o tsv): cluster admin, sets Key Vault secrets, reads backups.')
 param ownerObjectId string
 
-@description('The GitHub repository (owner/name) whose "production" environment may deploy.')
+@description('The GitHub repository whose "production" environment may deploy, as the GitHub sign-in token names it: owner@ownerId/name@repoId (the IDs come from https://api.github.com/repos/<owner>/<name>).')
 param githubRepository string
 
 @description('One small node runs the app and the system pods. Needs at least 2 vCPUs and 4 GiB.')

@@ -5,6 +5,7 @@ receives forwarded alerts. The agent never touches the owner's real inbox.
 
 ```
 real inbox ──(filter: from:jobalerts-noreply@linkedin.com → forward)──► dedicated Gmail ──(gmail.readonly)──► EmailSource
+                  ◄─(gmail.insert)─── apply kits (placed in the inbox, never sent)
 ```
 
 ## How it works
@@ -34,5 +35,15 @@ real inbox ──(filter: from:jobalerts-noreply@linkedin.com → forward)──
    ```
    Google warns the app is unverified; that's expected for a personal app (Advanced → continue).
 4. **Watchlist:** add `- { name: Alert emails, ats: email, board: gmail }` to `radar/watchlist.yaml`.
+
+## Apply kits in the inbox
+
+A kit asked for in chat (`/kit`, or the ✍️ Kit button) also lands in the dedicated inbox, from "Consigliere", with the
+tailored resume attached. It's *inserted* (`gmail.insert`), not sent: that permission can only add messages to this one
+mailbox, so a kit can't reach anyone else. The messages carry an `X-Consigliere` header, and the email source skips
+them. If delivery fails, chat says why; the kit itself still arrives in chat.
+
+A sign-in saved before this existed can only read. To add the permission, run `go run ./cmd/consigliere auth gmail`
+again, then push the secrets to Key Vault and restart the pod (docs/deploy.md, "Change a secret").
 
 To revoke access: myaccount.google.com/permissions (dedicated account), or delete the forwarding filter.
