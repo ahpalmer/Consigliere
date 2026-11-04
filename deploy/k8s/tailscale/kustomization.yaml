@@ -1,0 +1,81 @@
+# The Tailscale Kubernetes operator, and the dashboard published on the owner's tailnet (never the internet).
+# deploy/deploy.sh applies this after deploy/k8s once the infra has the operator's identity (tailscaleClientId).
+#
+# operator.yaml is Tailscale's static manifest, unmodified, from
+# https://github.com/tailscale/tailscale/blob/v1.104.2/cmd/k8s-operator/deploy/manifests/operator.yaml
+# To upgrade, replace it with a newer tag's copy (at least two weeks old) and bump the versions below.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - operator.yaml
+  - identity.yaml
+  - ingress.yaml
+
+images:
+  - name: tailscale/k8s-operator
+    newTag: v1.104.2
+
+configMapGenerator:
+  - name: tailscale-azure
+    namespace: tailscale
+    envs: [azure.env]
+
+patches:
+  # The OAuth client comes from Key Vault (identity.yaml), not from a Secret in the manifests.
+  - target: { kind: Secret, name: operator-oauth }
+    patch: |
+      $patch: delete
+      apiVersion: v1
+      kind: Secret
+      metadata:
+        name: operator-oauth
+        namespace: tailscale
+  - target: { kind: Deployment, name: operator }
+    patch: |
+      - op: replace
+        path: /spec/template/spec/volumes/0
+        value:
+          name: oauth
+          csi:
+            driver: secrets-store.csi.k8s.io
+            readOnly: true
+            volumeAttributes: { secretProviderClass: tailscale-oauth }
+      - op: add
+        path: /spec/template/metadata/labels/azure.workload.identity~1use
+        value: "true"
+      - op: replace
+        path: /spec/template/spec/containers/0/imagePullPolicy
+        value: IfNotPresent
+      # The proxies the operator starts run the same pinned version (the test fails the render if the env moves).
+      - op: test
+        path: /spec/template/spec/containers/0/env/10/name
+        value: PROXY_IMAGE
+      - op: replace
+        path: /spec/template/spec/containers/0/env/10/value
+        value: tailscale/tailscale:v1.104.2
+  - target: { kind: ServiceAccount, name: operator }
+    patch: |
+      - op: add
+        path: /metadata/annotations
+        value: { azure.workload.identity/client-id: TAILSCALE_CLIENT_ID }
+
+replacements:
+  - source: { kind: ConfigMap, name: tailscale-azure, fieldPath: data.TAILSCALE_CLIENT_ID }
+    targets:
+      - select: { kind: ServiceAccount, name: operator }
+        fieldPaths:
+          - metadata.annotations.[azure.workload.identity/client-id]
+      - select: { kind: SecretProviderClass, name: tailscale-oauth }
+        fieldPaths:
+          - spec.parameters.clientID
+  - source: { kind: ConfigMap, name: tailscale-azure, fieldPath: data.TENANT_ID }
+    targets:
+      - select: { kind: SecretProviderClass, name: tailscale-oauth }
+        fieldPaths:
+          - spec.parameters.tenantId
+  - source: { kind: ConfigMap, name: tailscale-azure, fieldPath: data.KEY_VAULT_NAME }
+    targets:
+      - select: { kind: SecretProviderClass, name: tailscale-oauth }
+        fieldPaths:
+          - spec.parameters.keyvaultName

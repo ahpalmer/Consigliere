@@ -7,8 +7,8 @@ that should be predictable.
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
-    browser([Browser via kubectl port-forward]) -. dashboard, signed in .-> host
-    subgraph AKS["AKS (single replica, no ingress)"]
+    browser([Browser via port-forward or tailnet]) -. dashboard, signed in .-> host
+    subgraph AKS["AKS (single replica, no public ingress)"]
         host[cmd/consigliere<br/>receiver + scheduler + dashboard]
         host --> router[router<br/>slash commands]
         router --> chat[llm.Chat<br/>Claude]
@@ -30,8 +30,8 @@ flowchart LR
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
 - **Minimal attack surface.** Telegram uses long-polling (outbound only), and only allowlisted chat IDs are answered.
-  The one listener is the dashboard: loopback by default, reachable in the cluster only through `kubectl port-forward` (no
-  ingress), and behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
+  The one listener is the dashboard: loopback by default, reachable in the cluster only through `kubectl port-forward` or
+  the owner's own tailnet (no public ingress), and behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
 - **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to a tiny container), the official
   Anthropic and Google SDKs, a ~150-line Telegram Bot API client instead of a framework, and a dashboard that's just
   React, React Router and hand-written CSS.
@@ -54,7 +54,7 @@ flowchart LR
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
 | `internal/backup` | Nightly database copy to blob storage, signed in with the pod's workload identity |
 | `infra` | Bicep: AKS, container registry, Key Vault, backup storage, identities, role assignments, budget |
-| `deploy`, `Dockerfile` | The container image, Kustomize manifests for AKS, and the deploy, secrets and restore scripts |
+| `deploy`, `Dockerfile` | The container image, Kustomize manifests for AKS (plus the optional Tailscale operator), and the deploy, secrets and restore scripts |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
 
 ## Run locally

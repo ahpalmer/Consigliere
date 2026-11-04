@@ -34,3 +34,4 @@ internal/web/dist/*
 !internal/web/dist/.gitkeep
 # Rendered by deploy/deploy.sh (Azure names and IDs, no secrets)
 deploy/k8s/azure.env
+deploy/k8s/tailscale/azure.env

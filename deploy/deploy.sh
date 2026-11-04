@@ -30,3 +30,17 @@ EOF
 
 kubectl apply -k deploy/k8s
 kubectl -n consigliere rollout status deployment/consigliere --timeout=5m
+
+# The Tailscale operator (dashboard on the tailnet) comes once the infra has its identity; until then it's skipped.
+tailscale_id=$(az deployment group show -g "$rg" -n consigliere --query properties.outputs.tailscaleClientId.value -o tsv | tr -d '\r')
+if [[ -n $tailscale_id && $tailscale_id != None ]]; then
+  cat >deploy/k8s/tailscale/azure.env <<EOF
+TAILSCALE_CLIENT_ID=$tailscale_id
+TENANT_ID=$tenant_id
+KEY_VAULT_NAME=$vault
+EOF
+  kubectl apply -k deploy/k8s/tailscale
+  kubectl -n tailscale rollout status deployment/operator --timeout=5m
+else
+  echo "No tailscaleClientId in the infra outputs yet: skipping the Tailscale operator (docs/deploy.md, 'Dashboard on your tailnet')."
+fi

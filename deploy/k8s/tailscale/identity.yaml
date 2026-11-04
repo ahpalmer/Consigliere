@@ -1,0 +1,24 @@
+# The operator's OAuth client, read from Key Vault as the operator's own Azure identity (id-consigliere-tailscale),
+# which can read these two secrets and nothing else. Mounted as the files the operator expects:
+# /oauth/client_id and /oauth/client_secret.
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: tailscale-oauth
+  namespace: tailscale
+spec:
+  provider: azure
+  parameters:
+    clientID: TAILSCALE_CLIENT_ID
+    tenantId: TENANT_ID
+    keyvaultName: KEY_VAULT_NAME
+    objects: |
+      array:
+        - |
+          objectName: tailscale-oauth-client-id
+          objectType: secret
+          objectAlias: client_id
+        - |
+          objectName: tailscale-oauth-client-secret
+          objectType: secret
+          objectAlias: client_secret

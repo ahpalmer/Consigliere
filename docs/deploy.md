@@ -6,6 +6,7 @@ The agent runs as a single pod on a one-node AKS cluster. Nearly all of it is co
 |---|---|---|
 | Azure resources: AKS, registry, Key Vault, backup storage, identities, role assignments, budget | `infra/*.bicep` | you, with `az deployment sub create` (first time, and when `infra/` changes) |
 | Kubernetes objects: namespace, disk, service account, Key Vault mounts, the Deployment | `deploy/k8s/` (Kustomize) | the `deploy` workflow, after CI passes on `main` |
+| Optional: the Tailscale operator and the dashboard on your tailnet | `deploy/k8s/tailscale/` | the `deploy` workflow, once set up ([below](#dashboard-on-your-tailnet)) |
 | The container image | `Dockerfile` | the `deploy` workflow |
 | Secret values | Key Vault | you, with `deploy/push-secrets.sh` |
 
@@ -36,9 +37,9 @@ flowchart LR
 
 ## How it fits together
 
-- **One replica, no ingress.** Telegram allows one long-poller per bot and SQLite has one writer, so the Deployment runs
-  exactly one pod and uses `Recreate`. Everything is outbound; nothing listens on the internet. The dashboard is reached
-  with `kubectl port-forward`.
+- **One replica, no public ingress.** Telegram allows one long-poller per bot and SQLite has one writer, so the
+  Deployment runs exactly one pod and uses `Recreate`. Everything is outbound; nothing listens on the internet. The
+  dashboard is reached with `kubectl port-forward`, or privately over your tailnet ([below](#dashboard-on-your-tailnet)).
 - **Sign-in without stored keys.** GitHub Actions signs in to Azure over OIDC as `id-consigliere-github`, which only the
   repository's `production` environment can use. The pod signs in as `id-consigliere-app` through workload identity.
   The cluster takes Entra ID sign-in only: there are no local admin accounts and no shared kubeconfig.
@@ -142,4 +143,51 @@ Run these from the repo root in Git Bash, signed in to your **personal** Azure a
 | Run the agent locally for a while | `kubectl -n consigliere scale deploy/consigliere --replicas=0` first, and `--replicas=1` when you're done. |
 | Change Azure resources | Edit `infra/`, then rerun the `what-if` and `create` commands from step 3. |
 | Restore a backup | `az storage blob list --auth-mode login --account-name <storageAccountName> -c backups -o table`, then `az storage blob download --auth-mode login --account-name <storageAccountName> -c backups -n <blob> -f restore.db` and `bash deploy/restore-db.sh restore.db`. The replaced file is kept on the disk as `consigliere.db.before-restore`. |
+| Open the dashboard from your phone | With the tailnet set up ([below](#dashboard-on-your-tailnet)): Tailscale on, then `https://consigliere.<tailnet>.ts.net`. |
 | Tear everything down | Download a backup, then `az group delete -n rg-consigliere`. This also removes the node resource group and the disk. Key Vault stays recoverable for 7 days (`az keyvault purge` removes it sooner). |
+
+## Dashboard on your tailnet
+
+Optional: the [Tailscale Kubernetes operator](https://tailscale.com/kb/1236/kubernetes-operator) publishes the dashboard
+at `https://consigliere.<tailnet>.ts.net`, reachable from your own devices running Tailscale (phone included) without a
+tunnel. It's tailnet-only (not Funnel), the dashboard's sign-in still applies, and the cluster still has no public
+endpoint: the proxy connects out to Tailscale like any other device.
+
+- `deploy/k8s/tailscale/operator.yaml` is Tailscale's static manifest, unmodified and pinned (the version is in its
+  `kustomization.yaml`, which also pins the images and swaps the manifest's placeholder Secret for Key Vault).
+- The operator signs in to Azure as `id-consigliere-tailscale`, which can read two Key Vault secrets and nothing else:
+  `tailscale-oauth-client-id` and `tailscale-oauth-client-secret`. It never sees the app's secrets, and the app never
+  sees these.
+- `deploy/deploy.sh` applies it only once the infra outputs `tailscaleClientId`, so until you've set it up, deploys skip it.
+
+Setup, once:
+
+1. **Tailscale policy.** In the admin console → Access controls, let the operator own its proxies:
+   ```json
+   "tagOwners": {
+     "tag:k8s-operator": [],
+     "tag:k8s": ["tag:k8s-operator"]
+   }
+   ```
+   Under DNS, turn on MagicDNS and HTTPS Certificates.
+2. **OAuth client.** Settings → Trust credentials → new OAuth credential, *Custom scopes*: **Write** on Devices → Core,
+   Keys → Auth Keys, and General → Services, each tagged `tag:k8s-operator`.
+3. **Key Vault.** Save its two values without printing them (PowerShell):
+   ```powershell
+   $vault = az deployment group show -g rg-consigliere -n consigliere --query properties.outputs.keyVaultName.value -o tsv
+   $f = New-TemporaryFile
+   foreach ($name in 'tailscale-oauth-client-id', 'tailscale-oauth-client-secret') {
+     $v = Read-Host "Paste $name" -AsSecureString
+     [Net.NetworkCredential]::new('', $v).Password | Set-Content -NoNewline $f
+     az keyvault secret set --vault-name $vault --name $name --file $f --encoding utf-8 -o none
+   }
+   Remove-Item $f
+   ```
+4. **Infra.** Rerun the `what-if` and `create` commands from step 3 of the one-time setup. They add the identity, its
+   federation to the `tailscale/operator` service account, and read access to those two secrets (the secrets must exist
+   first).
+5. **Deploy.** Push to `main`, or Actions → deploy → Run workflow. Then `kubectl -n tailscale get pods` shows the operator
+   and a proxy, and the admin console shows `tailscale-operator` and `consigliere` as devices.
+
+To rotate the OAuth client, create a new one, rerun step 3, and `kubectl -n tailscale rollout restart deploy/operator`.
+To remove it all: `kubectl delete -k deploy/k8s/tailscale`, then delete the two devices in the admin console.

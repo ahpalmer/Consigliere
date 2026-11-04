@@ -10,6 +10,9 @@ param budgetStartDate string
 
 // The app's Kubernetes identity: namespace and service account in deploy/k8s.
 var appServiceAccount = 'system:serviceaccount:consigliere:consigliere'
+// The Tailscale operator's (deploy/k8s/tailscale), and the two Key Vault secrets it may read (its OAuth client).
+var tailscaleServiceAccount = 'system:serviceaccount:tailscale:operator'
+var tailscaleSecretNames = ['tailscale-oauth-client-id', 'tailscale-oauth-client-secret']
 var suffix = uniqueString(resourceGroup().id)
 
 // Built-in role definitions: public IDs, the same in every tenant. gitleaks mistakes the "Secrets" ones for keys.
@@ -27,8 +30,8 @@ var roles = {
 
 // ---------- Cluster ----------
 
-// Free tier, one node, no ingress: the app only makes outbound calls (Telegram long-polling, APIs), and the
-// dashboard is reached with kubectl port-forward. Sign-in is Entra ID only (no local admin kubeconfig).
+// Free tier, one node, no public ingress: the app only makes outbound calls (Telegram long-polling, APIs), and the
+// dashboard is reached with kubectl port-forward or, privately, over the owner's tailnet (deploy/k8s/tailscale). Sign-in is Entra ID only (no local admin kubeconfig).
 resource aks 'Microsoft.ContainerService/managedClusters@2024-09-01' = {
   name: 'aks-consigliere'
   location: location
@@ -241,6 +244,22 @@ resource appFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federat
   }
 }
 
+// The Tailscale operator signs in as this identity to read its OAuth client from Key Vault, and nothing else.
+resource tailscaleIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
+  name: 'id-consigliere-tailscale'
+  location: location
+}
+
+resource tailscaleFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
+  parent: tailscaleIdentity
+  name: 'aks-service-account'
+  properties: {
+    issuer: aks.properties.oidcIssuerProfile.issuerURL
+    subject: tailscaleServiceAccount
+    audiences: ['api://AzureADTokenExchange']
+  }
+}
+
 // GitHub Actions signs in as this identity over OIDC, only from the repository's "production" environment.
 resource githubIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-consigliere-github'
@@ -280,6 +299,22 @@ resource appSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalType: 'ServicePrincipal'
   }
 }
+
+// The Tailscale operator reads its two secrets only (not the vault): they're set by hand first (docs/deploy.md).
+resource tailscaleSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in tailscaleSecretNames: {
+  parent: vault
+  name: name
+}]
+
+resource tailscaleSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in tailscaleSecretNames: {
+  name: guid(tailscaleSecrets[i].id, tailscaleIdentity.id, roles.keyVaultSecretsUser)
+  scope: tailscaleSecrets[i]
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsUser)
+    principalId: tailscaleIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}]
 
 resource appBackups 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(backupContainer.id, appIdentity.id, roles.blobDataContributor)
@@ -403,3 +438,4 @@ output storageAccountName string = storage.name
 output backupContainerUrl string = '${storage.properties.primaryEndpoints.blob}${backupContainer.name}'
 output appClientId string = appIdentity.properties.clientId
 output githubClientId string = githubIdentity.properties.clientId
+output tailscaleClientId string = tailscaleIdentity.properties.clientId

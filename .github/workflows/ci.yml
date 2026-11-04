@@ -60,6 +60,8 @@ jobs:
         run: |
           cp deploy/k8s/azure.env.example deploy/k8s/azure.env
           kubectl kustomize deploy/k8s > /dev/null
+          cp deploy/k8s/tailscale/azure.env.example deploy/k8s/tailscale/azure.env
+          kubectl kustomize deploy/k8s/tailscale > /dev/null
 
       - name: Shell scripts
         run: shellcheck deploy/*.sh deploy/k8s/datapack-sync.sh

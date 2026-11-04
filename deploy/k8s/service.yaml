@@ -1,4 +1,5 @@
-# Cluster-internal only, for `kubectl port-forward svc/consigliere 8080`. Nothing is exposed outside the cluster.
+# Cluster-internal, for `kubectl port-forward svc/consigliere 8080` and the optional tailnet-only Ingress in
+# deploy/k8s/tailscale. Nothing is exposed to the internet.
 apiVersion: v1
 kind: Service
 metadata:
