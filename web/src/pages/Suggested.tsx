@@ -84,23 +84,30 @@ function Summary({ s }: { s: Suggestion }) {
   );
 }
 
+/** Moves the job into Active and opens its pursuit. */
+function ActivateButton({ id, label, primary, run, busy }: { id: number; label: string; primary?: boolean; run: ReturnType<typeof useAction>["run"]; busy: boolean }) {
+  const navigate = useNavigate();
+  return (
+    <button
+      className={primary ? "btn primary small" : "btn small"}
+      disabled={busy}
+      onClick={async () => {
+        const res = await run(() => api.activateItem(id));
+        if (res) navigate(`/pursuits/${res.pursuit.id}`, { state: { warning: res.warning } });
+      }}
+    >
+      🎯 {label}
+    </button>
+  );
+}
+
 function HighRow({ s, onChange }: { s: Suggestion; onChange: () => Promise<void> }) {
   const { run, busy, error } = useAction();
-  const navigate = useNavigate();
   return (
     <li className="option">
       <Summary s={s} />
       <div className="item-actions">
-        <button
-          className="btn primary small"
-          disabled={busy}
-          onClick={async () => {
-            const res = await run(() => api.activateItem(s.id));
-            if (res) navigate(`/pursuits/${res.pursuit.id}`, { state: { warning: res.warning } });
-          }}
-        >
-          🎯 Make active
-        </button>
+        <ActivateButton id={s.id} label="Make active" primary run={run} busy={busy} />
         <div className="row">
           <button className="btn ghost small" disabled={busy} onClick={async () => (await run(() => api.feedback(s.id, -1))) && onChange()}>
             Not for me
@@ -141,6 +148,7 @@ function ApplyCard({ s, onChange }: { s: Suggestion; onChange: () => Promise<voi
               Failed: try again
             </button>
           )}
+          <ActivateButton id={s.id} label="Add to active" run={run} busy={busy} />
           <button className="btn ghost small" disabled={busy} onClick={async () => (await run(() => api.feedback(s.id, -1))) && onChange()}>
             Not for me
           </button>
