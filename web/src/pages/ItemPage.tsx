@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { api } from "../api";
+import { api, type Draft } from "../api";
 import { ErrorNote, External, Fit, Panel } from "../components";
 import { relativeDay, shortDate } from "../format";
-import { useLoad } from "../hooks";
+import { useAction, useLoad } from "../hooks";
 import { ItemActions } from "./Options";
+import { coverHint, coverPlaceholder, DraftRow } from "./PursuitPage";
 
 export function ItemPage() {
   const id = Number(useParams().id);
-  const item = useLoad(() => api.item(id), [id]);
+  // While a letter is being written, check back every few seconds.
+  const item = useLoad(() => api.item(id), [id], { poll: (d) => d?.drafts.some((x) => x.status === "pending") ?? false });
   const [full, setFull] = useState(false);
 
   if (!item.data) {
@@ -78,6 +80,7 @@ export function ItemPage() {
               </>
             )}
           </Panel>
+          <CoverLetter itemId={o.id} drafts={item.data.drafts.filter((d) => d.kind === "cover")} onChange={item.reload} />
         </div>
         <div className="stack">
           <Panel title="Posting">
@@ -97,5 +100,40 @@ export function ItemPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function CoverLetter({ itemId, drafts, onChange }: { itemId: number; drafts: Draft[]; onChange: () => Promise<void> }) {
+  const [instructions, setInstructions] = useState("");
+  const [open, setOpen] = useState<number | null>(null);
+  const { run, busy, error } = useAction();
+  return (
+    <Panel title="Cover letter">
+      <form
+        className="subform"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          const d = await run(() => api.coverLetter(itemId, instructions.trim()));
+          if (d) {
+            setOpen(d.id);
+            await onChange();
+          }
+        }}
+      >
+        <p className="muted small">{coverHint} Takes about a minute; nothing is sent anywhere.</p>
+        <textarea rows={6} value={instructions} placeholder={coverPlaceholder} onChange={(e) => setInstructions(e.target.value)} />
+        <button className="btn primary" disabled={busy}>
+          📝 Write cover letter
+        </button>
+      </form>
+      <ErrorNote message={error} />
+      {drafts.length > 0 && (
+        <ul className="drafts">
+          {drafts.map((d) => (
+            <DraftRow key={d.id} d={d} open={open === d.id} onToggle={() => setOpen(open === d.id ? null : d.id)} />
+          ))}
+        </ul>
+      )}
+    </Panel>
   );
 }

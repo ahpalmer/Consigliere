@@ -70,6 +70,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/options", s.options)
 	mux.HandleFunc("GET /api/items/{id}", s.getItem)
 	mux.HandleFunc("PUT /api/items/{id}/feedback", s.feedback)
+	mux.HandleFunc("POST /api/items/{id}/cover", s.coverLetter)
 
 	mux.HandleFunc("GET /api/suggestions", s.suggestions)
 	mux.HandleFunc("POST /api/items/{id}/kit", s.prepareKit)
@@ -500,8 +501,10 @@ func (s *Server) startDraft(w http.ResponseWriter, r *http.Request) {
 		d, err = s.Drafts.StartPrep(ctx, p, body.Notes, nil)
 	case "thanks":
 		d, err = s.Drafts.StartThanks(ctx, p, body.Notes, nil)
+	case "cover":
+		d, err = s.Drafts.StartCover(ctx, p, nil, body.Notes, nil)
 	default:
-		writeError(w, http.StatusBadRequest, "kind must be kit, prep or thanks")
+		writeError(w, http.StatusBadRequest, "kind must be kit, cover, prep or thanks")
 		return
 	}
 	if err != nil {
@@ -615,7 +618,41 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id]), "description": item.Description})
+	drafts, err := s.Drafts.ForItem(ctx, id)
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	dr := []draftJSON{}
+	for _, d := range drafts {
+		d.Text = "" // GET /api/drafts/{id} has the text
+		dr = append(dr, toDraftJSON(d))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id]), "description": item.Description, "drafts": dr})
+}
+
+// coverLetter starts a cover letter for an item; it joins the item's pursuit when there is one.
+func (s *Server) coverLetter(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct{ Instructions string }
+	if !readJSON(w, r, &body) {
+		return
+	}
+	ctx := r.Context()
+	pursuits, err := s.Pipeline.ForItems(ctx, []int64{id})
+	if err != nil {
+		serverError(w, err)
+		return
+	}
+	d, err := s.Drafts.StartCover(ctx, pursuits[id], &id, body.Instructions, nil)
+	if err != nil {
+		actionError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, toDraftJSON(d))
 }
 
 func (s *Server) feedback(w http.ResponseWriter, r *http.Request) {

@@ -9,13 +9,14 @@ import (
 	"time"
 )
 
-// Letter page with 0.5" margins, in twentieths of a point.
+// Letter page with 0.5" margins for the resume and 1" for letters, in twentieths of a point.
 const (
-	pageWidth   = 12240
-	pageHeight  = 15840
-	margin      = 720
-	rightTab    = pageWidth - 2*margin
-	bulletShift = 270
+	pageWidth    = 12240
+	pageHeight   = 15840
+	margin       = 720
+	letterMargin = 1440
+	rightTab     = pageWidth - 2*margin
+	bulletShift  = 270
 )
 
 // RenderDOCX lays out a one-page resume: header, skills, the selected bullets per section, education.
@@ -67,10 +68,15 @@ func RenderDOCX(p *Profile, sel Selection) ([]byte, error) {
 		}
 	}
 
+	return writeDOCX(body.String(), margin, styles)
+}
+
+// writeDOCX packages a document body (paragraph XML) on a Letter page with the given margins and styles.
+func writeDOCX(body string, margins int, styles string) ([]byte, error) {
 	document := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` + body.String() +
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>` + body +
 		fmt.Sprintf(`<w:sectPr><w:pgSz w:w="%d" w:h="%d"/><w:pgMar w:top="%d" w:right="%d" w:bottom="%d" w:left="%d" w:header="0" w:footer="0" w:gutter="0"/></w:sectPr>`,
-			pageWidth, pageHeight, margin, margin, margin, margin) +
+			pageWidth, pageHeight, margins, margins, margins, margins) +
 		`</w:body></w:document>`
 
 	var buf bytes.Buffer
@@ -97,6 +103,30 @@ func RenderDOCX(p *Profile, sel Selection) ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// RenderLetterDOCX lays out a one-page letter: the sender's name and contact line, the date, then the paragraphs
+// (greeting and sign-off included), each followed by a blank line's worth of space.
+func RenderLetterDOCX(name, contact, date string, paragraphs []string) ([]byte, error) {
+	var body strings.Builder
+	para(&body, paraProps{after: 0}, run{text: name, bold: true, size: 28})
+	if contact != "" {
+		para(&body, paraProps{after: 240}, run{text: contact, size: 20})
+	}
+	para(&body, paraProps{after: 240}, run{text: date})
+	for _, p := range paragraphs {
+		// A line break inside a paragraph (the sign-off's "Sincerely,\nName") stays one paragraph.
+		lines := strings.Split(p, "\n")
+		runs := []run{}
+		for i, l := range lines {
+			if i > 0 {
+				runs = append(runs, run{lineBreak: true})
+			}
+			runs = append(runs, run{text: l})
+		}
+		para(&body, paraProps{after: 200}, runs...)
+	}
+	return writeDOCX(body.String(), letterMargin, letterStyles)
+}
+
 // splitLead splits "Lead-in: rest" so the lead-in can be bold. Lines without a short lead-in come back whole.
 func splitLead(s string) (lead, rest string) {
 	if i := strings.Index(s, ": "); i > 0 && i <= 90 {
@@ -116,6 +146,7 @@ type run struct {
 	bold, italic bool
 	size         int // half-points; 0 = style default
 	tab          bool
+	lineBreak    bool
 }
 
 func para(sb *strings.Builder, p paraProps, runs ...run) {
@@ -139,7 +170,7 @@ func para(sb *strings.Builder, p paraProps, runs ...run) {
 	}
 	sb.WriteString("</w:pPr>")
 	for _, r := range runs {
-		if !r.tab && r.text == "" {
+		if !r.tab && !r.lineBreak && r.text == "" {
 			continue
 		}
 		sb.WriteString("<w:r>")
@@ -156,9 +187,12 @@ func para(sb *strings.Builder, p paraProps, runs ...run) {
 			}
 			sb.WriteString("</w:rPr>")
 		}
-		if r.tab {
+		switch {
+		case r.tab:
 			sb.WriteString("<w:tab/>")
-		} else {
+		case r.lineBreak:
+			sb.WriteString("<w:br/>")
+		default:
 			sb.WriteString(`<w:t xml:space="preserve">`)
 			xml.EscapeText(sb, []byte(r.text))
 			sb.WriteString("</w:t>")
@@ -187,3 +221,7 @@ const documentRels = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 // Calibri 10pt, single spacing, no space after paragraphs: dense enough for one page.
 const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="20"/><w:szCs w:val="20"/><w:lang w:val="en-US"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="240" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`
+
+// Calibri 11pt with slightly open line spacing: a letter reads better with air.
+const letterStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri" w:hAnsi="Calibri" w:eastAsia="Calibri" w:cs="Calibri"/><w:sz w:val="22"/><w:szCs w:val="22"/><w:lang w:val="en-US"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="0" w:line="264" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:qFormat/></w:style></w:styles>`

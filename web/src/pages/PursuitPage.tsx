@@ -5,6 +5,11 @@ import { Badge, ErrorNote, External, Fit, Panel, StageBadge } from "../component
 import { completion, dateTime, eventText, nextWorkdayMorning, outcomeLabels, relativeDay, shortDate, toLocalInput } from "../format";
 import { useAction, useLoad } from "../hooks";
 
+export const coverHint =
+  "A one-page letter as a Word file, written from your resume, wins and stories plus what you add here. Questions you ask get answered in notes below the letter, not in it.";
+export const coverPlaceholder =
+  "Why you want this job, what to stress, facts that aren't on your resume (a side project, a product you use). Optional.";
+
 export function PursuitPage() {
   const id = Number(useParams().id);
   const location = useLocation();
@@ -269,8 +274,9 @@ function Notes({ p, onChange }: { p: Pursuit; onChange: () => Promise<void> }) {
   );
 }
 
-const draftKinds: { kind: DraftKind; label: string; hint: string; needsNotes?: boolean; placeholder?: string }[] = [
+const draftKinds: { kind: DraftKind; label: string; hint: string; needsNotes?: boolean; placeholder?: string; rows?: number }[] = [
   { kind: "kit", label: "✍️ Apply kit", hint: "Tailored one-page resume, people you know there, search links, outreach drafts." },
+  { kind: "cover", label: "📝 Cover letter", hint: coverHint, placeholder: coverPlaceholder, rows: 6 },
   { kind: "prep", label: "🎤 Prep pack", hint: "Likely questions, which stories to tell, questions to ask.", placeholder: "Anything about the interview (optional)" },
   { kind: "thanks", label: "✉️ Thank-you", hint: "A short note to send after an interview.", needsNotes: true, placeholder: "Who you met, what you talked about" },
 ];
@@ -307,7 +313,7 @@ function Drafts({ p, drafts, onChange }: { p: Pursuit; drafts: Draft[]; onChange
         >
           <p className="muted small">{chosen.hint} Takes about a minute; nothing is sent anywhere.</p>
           {chosen.placeholder && (
-            <textarea rows={2} value={notes} placeholder={chosen.placeholder} onChange={(e) => setNotes(e.target.value)} required={chosen.needsNotes} />
+            <textarea rows={chosen.rows ?? 2} value={notes} placeholder={chosen.placeholder} onChange={(e) => setNotes(e.target.value)} required={chosen.needsNotes} />
           )}
           <button className="btn primary" disabled={busy}>
             Write it
@@ -328,7 +334,7 @@ function Drafts({ p, drafts, onChange }: { p: Pursuit; drafts: Draft[]; onChange
   );
 }
 
-function DraftRow({ d, open, onToggle }: { d: Draft; open: boolean; onToggle: () => void }) {
+export function DraftRow({ d, open, onToggle }: { d: Draft; open: boolean; onToggle: () => void }) {
   // The pursuit lists drafts without their text; fetch it when opened (and again once a pending one is ready).
   const full = useLoad(async () => (open && d.status === "ready" ? api.draft(d.id) : undefined), [open, d.status, d.id]);
   const [copied, setCopied] = useState(false);

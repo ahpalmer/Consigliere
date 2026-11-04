@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ahpalmer/consigliere/internal/datapack"
 	"github.com/ahpalmer/consigliere/internal/llm"
@@ -242,7 +243,7 @@ func TestLimitRunesPrefersSentenceEnds(t *testing.T) {
 }
 
 func TestFileName(t *testing.T) {
-	if got := fileName("ANDREW PALMER", "GitHub, Inc."); got != "Andrew_Palmer_Resume_-_GitHub_Inc.docx" {
+	if got := fileName("ANDREW PALMER", "Resume", "GitHub, Inc."); got != "Andrew_Palmer_Resume_-_GitHub_Inc.docx" {
 		t.Fatal(got)
 	}
 }
@@ -307,6 +308,60 @@ func TestBuildKit(t *testing.T) {
 	schema, _ := json.Marshal(req.Schema)
 	if strings.Contains(string(schema), `"a5"`) || !strings.Contains(string(schema), `"a1"`) {
 		t.Errorf("schema enum wrong: %s", schema)
+	}
+}
+
+func TestCoverLetterAddsTheFrameAndKeepsNotesOutOfTheLetter(t *testing.T) {
+	pack := testPack(t, map[string]string{ProfilePath: testProfile, ResumePath: "Sam Sample. Built the thing.", WinsPath: "Shipped to 10 teams."})
+	reply, _ := json.Marshal(map[string]any{
+		"paragraphs":  []string{"I want to work on private networking.", " ", "I built the thing for 10 teams."},
+		"why_company": "Your product is the one I already use.",
+		"notes":       []string{"Privacy is part of it, but the posting leads with security and ease of use."},
+	})
+	fake := &fakeLLM{structured: string(reply)}
+	k := &Kit{Pack: pack, LLM: fake, Owner: "Sam"}
+	date := time.Date(2026, 11, 4, 9, 0, 0, 0, time.UTC)
+	letter, err := k.CoverLetter(context.Background(), Job{Company: "Tailscale", Title: "Infrastructure Engineer", Description: "Run infra."},
+		"I care about privacy. Is that their main focus?", date)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "Dear Tailscale Hiring Team,\n\nI want to work on private networking.\n\nI built the thing for 10 teams.\n\nSincerely,\nSam Sample"
+	if letter.Answers[0].Label != "Cover letter" || letter.Answers[0].Text != want {
+		t.Fatalf("letter = %q", letter.Answers[0].Text)
+	}
+	if len(letter.Answers) != 2 || letter.Answers[1].Label != "Why Tailscale?" {
+		t.Fatalf("answers = %+v", letter.Answers)
+	}
+	if !strings.Contains(letter.Text, "Notes for you (not in the letter):\n• Privacy is part of it") {
+		t.Errorf("notes missing:\n%s", letter.Text)
+	}
+	if letter.FileName != "Sam_Sample_Cover_Letter_-_Tailscale.docx" {
+		t.Error(letter.FileName)
+	}
+	doc := docxText(t, letter.File)
+	for _, s := range []string{"SAM SAMPLE", "sam@example.com", "November 4, 2026", "Dear Tailscale Hiring Team,", "private networking", "Sincerely,"} {
+		if !strings.Contains(doc, s) {
+			t.Errorf("docx lacks %q", s)
+		}
+	}
+	if strings.Contains(doc, "Privacy is part of it") {
+		t.Error("notes leaked into the letter")
+	}
+
+	// The model sees the owner's instructions, the posting and the background (resume and wins), not the bullet bank.
+	req := fake.requests[0]
+	if !strings.Contains(req.User, "I care about privacy") || !strings.Contains(req.User, "Run infra.") ||
+		!strings.Contains(req.System[1].Text, "Shipped to 10 teams.") || !strings.Contains(req.System[1].Text, "Built the thing") {
+		t.Errorf("request = %+v", req)
+	}
+
+	if _, err := k.CoverLetter(context.Background(), Job{Company: "X"}, strings.Repeat("a", maxInstructionsChars+1), date); err == nil {
+		t.Error("accepted instructions that are far too long")
+	}
+	empty := &Kit{Pack: testPack(t, map[string]string{}), LLM: fake, Owner: "Sam"}
+	if _, err := empty.CoverLetter(context.Background(), Job{Company: "X"}, "", date); err == nil {
+		t.Error("wrote a letter with no background")
 	}
 }
 

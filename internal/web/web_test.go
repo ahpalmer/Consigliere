@@ -26,7 +26,10 @@ import (
 
 type fakeLLM struct{}
 
-func (fakeLLM) Structured(context.Context, llm.StructuredRequest) (string, error) {
+func (fakeLLM) Structured(_ context.Context, req llm.StructuredRequest) (string, error) {
+	if props, _ := req.Schema["properties"].(map[string]any); props["paragraphs"] != nil {
+		return `{"paragraphs":["I want to run Acme's fleets.","I ran 4,000 machines."],"why_company":"Fleets.","notes":["Checked."]}`, nil
+	}
 	return `{"why_company":"Acme runs the fleets I want to work on.","cover_letter":"Dear Hiring Team,\n\nI run fleets.\n\nSam"}`, nil
 }
 func (fakeLLM) Generate(_ context.Context, req llm.GenerateRequest) (string, error) {
@@ -407,6 +410,47 @@ func TestSuggestionsPrepareAndApply(t *testing.T) {
 	f.do("GET", "/api/suggestions", "", &got)
 	if len(got.High) != 0 || len(got.Medium) != 0 {
 		t.Fatalf("after = %+v", got)
+	}
+}
+
+func TestCoverLetterForAnItemJoinsItsPursuit(t *testing.T) {
+	f := newFixture(t, "")
+	var d draftJSON
+	if code := f.do("POST", "/api/items/2/cover", `{"instructions":"I like fleets."}`, &d); code != http.StatusAccepted || d.Kind != "cover" || d.PursuitID != nil {
+		t.Fatalf("cover = %d %+v", code, d)
+	}
+	if !f.tasks.Wait(5 * time.Second) {
+		t.Fatal("letter still being written")
+	}
+	f.do("GET", "/api/drafts/"+itoa(d.ID), "", &d)
+	if d.Status != "ready" || !strings.HasPrefix(d.Text, "Dear Acme Hiring Team,") || !strings.Contains(d.Text, "Checked.") ||
+		!strings.HasSuffix(d.FileName, "Cover_Letter_-_Acme.docx") || d.Answers[0].Label != "Cover letter" {
+		t.Fatalf("letter = %+v", d)
+	}
+	if code := f.do("GET", "/api/drafts/"+itoa(d.ID)+"/file", "", nil); code != http.StatusOK {
+		t.Fatalf("download = %d", code)
+	}
+	var item struct{ Drafts []draftJSON }
+	f.do("GET", "/api/items/2", "", &item)
+	if len(item.Drafts) != 1 || item.Drafts[0].Text != "" {
+		t.Fatalf("item drafts = %+v", item.Drafts)
+	}
+
+	// Once it's a pursuit, a new letter belongs to it, and the pursuit lists both.
+	var activated struct{ Pursuit pursuitJSON }
+	f.do("POST", "/api/pursuits", `{"itemId":2}`, &activated)
+	f.do("POST", "/api/items/2/cover", `{}`, &d)
+	if d.PursuitID == nil || *d.PursuitID != activated.Pursuit.ID {
+		t.Fatalf("second letter = %+v", d)
+	}
+	f.tasks.Wait(5 * time.Second)
+	var detail struct{ Drafts []draftJSON }
+	f.do("GET", "/api/pursuits/"+itoa(activated.Pursuit.ID), "", &detail)
+	if len(detail.Drafts) != 2 {
+		t.Fatalf("pursuit drafts = %+v", detail.Drafts)
+	}
+	if code := f.do("POST", "/api/items/999/cover", `{}`, nil); code != http.StatusNotFound {
+		t.Fatalf("unknown item = %d", code)
 	}
 }
 

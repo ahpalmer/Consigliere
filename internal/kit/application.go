@@ -66,12 +66,7 @@ func Applicant(pack *datapack.Pack) ([]Field, error) {
 // contactFields splits "ANDREW PALMER" and "(555) 123-4567 · me@example.com · linkedin.com/in/me" into form fields.
 func contactFields(name, contact string) []Field {
 	var fields []Field
-	words := strings.Fields(name)
-	for i, w := range words {
-		r := []rune(strings.ToLower(w))
-		r[0] = unicode.ToUpper(r[0])
-		words[i] = string(r)
-	}
+	words := titleWords(name)
 	if len(words) > 0 {
 		fields = append(fields, Field{"Full name", strings.Join(words, " ")}, Field{"First name", words[0]})
 		if len(words) > 1 {
@@ -98,6 +93,17 @@ func contactFields(name, contact string) []Field {
 		}
 	}
 	return fields
+}
+
+// titleWords: "ANDREW PALMER" → ["Andrew", "Palmer"].
+func titleWords(name string) []string {
+	words := strings.Fields(name)
+	for i, w := range words {
+		r := []rune(strings.ToLower(w))
+		r[0] = unicode.ToUpper(r[0])
+		words[i] = string(r)
+	}
+	return words
 }
 
 // Forms validate URL fields, so "linkedin.com/in/me" becomes "https://linkedin.com/in/me".

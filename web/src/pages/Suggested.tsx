@@ -101,6 +101,15 @@ function ActivateButton({ id, label, primary, run, busy }: { id: number; label: 
   );
 }
 
+/** The job's page has the cover letter writer (instructions box, Word download). */
+function CoverLink({ id }: { id: number }) {
+  return (
+    <Link className="btn small" to={`/items/${id}`}>
+      📝 Cover letter
+    </Link>
+  );
+}
+
 function HighRow({ s, onChange }: { s: Suggestion; onChange: () => Promise<void> }) {
   const { run, busy, error } = useAction();
   return (
@@ -108,6 +117,7 @@ function HighRow({ s, onChange }: { s: Suggestion; onChange: () => Promise<void>
       <Summary s={s} />
       <div className="item-actions">
         <ActivateButton id={s.id} label="Make active" primary run={run} busy={busy} />
+        <CoverLink id={s.id} />
         <div className="row">
           <button className="btn ghost small" disabled={busy} onClick={async () => (await run(() => api.feedback(s.id, -1))) && onChange()}>
             Not for me
@@ -149,6 +159,7 @@ function ApplyCard({ s, onChange }: { s: Suggestion; onChange: () => Promise<voi
             </button>
           )}
           <ActivateButton id={s.id} label="Add to active" run={run} busy={busy} />
+          <CoverLink id={s.id} />
           <button className="btn ghost small" disabled={busy} onClick={async () => (await run(() => api.feedback(s.id, -1))) && onChange()}>
             Not for me
           </button>

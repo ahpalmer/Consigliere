@@ -49,7 +49,7 @@ export interface Summary {
   outcomes: Record<string, number>;
 }
 
-export type DraftKind = "kit" | "prep" | "thanks";
+export type DraftKind = "kit" | "cover" | "prep" | "thanks";
 
 /** A drafted answer to an application question (why this company, cover letter). */
 export interface Answer {
@@ -231,8 +231,9 @@ export const api = {
     if (q.minScore !== undefined) params.set("minScore", String(q.minScore));
     return get<OptionsPage>(`/api/options?${params}`);
   },
-  item: (id: number) => get<{ item: Option; description: string }>(`/api/items/${id}`),
+  item: (id: number) => get<{ item: Option; description: string; drafts: Draft[] }>(`/api/items/${id}`),
   feedback: (id: number, value: 1 | -1) => send<{ feedback: number }>("PUT", `/api/items/${id}/feedback`, { value }),
+  coverLetter: (itemId: number, instructions: string) => send<Draft>("POST", `/api/items/${itemId}/cover`, { instructions }),
 
   suggestions: () => get<SuggestionsPage>("/api/suggestions"),
   prepareKit: (itemId: number) => send<Draft>("POST", `/api/items/${itemId}/kit`),

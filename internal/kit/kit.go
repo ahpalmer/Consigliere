@@ -109,7 +109,7 @@ func (k *Kit) Build(ctx context.Context, job Job) (*Result, error) {
 		if result.File, err = RenderDOCX(profile, selection); err != nil {
 			return nil, err
 		}
-		result.FileName = fileName(profile.Name, job.Company)
+		result.FileName = fileName(profile.Name, "Resume", job.Company)
 		count := 0
 		for _, ids := range selection {
 			count += len(ids)
@@ -368,8 +368,8 @@ func limitRunes(s string, max int) (string, bool) {
 	return strings.TrimSpace(string(r[:max-1])) + "…", true
 }
 
-// fileName: "ANDREW PALMER", "GitHub, Inc." → "Andrew_Palmer_Resume_-_GitHub_Inc.docx".
-func fileName(name, company string) string {
+// fileName: "ANDREW PALMER", "Resume", "GitHub, Inc." → "Andrew_Palmer_Resume_-_GitHub_Inc.docx".
+func fileName(name, kind, company string) string {
 	words := func(s string) []string {
 		return strings.FieldsFunc(s, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 	}
@@ -379,7 +379,7 @@ func fileName(name, company string) string {
 		r[0] = unicode.ToUpper(r[0])
 		person = append(person, string(r))
 	}
-	base := strings.Join(person, "_") + "_Resume"
+	base := strings.Join(append(person, kind), "_")
 	if c := words(company); len(c) > 0 {
 		base += "_-_" + strings.Join(c, "_")
 	}

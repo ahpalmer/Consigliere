@@ -22,13 +22,14 @@ const (
 
 var ErrPaused = errors.New("paused; resume first")
 
-// Draft is something the model wrote for the owner to review: an apply kit, a prep pack or a thank-you note.
+// Draft is something the model wrote for the owner to review: an apply kit, a cover letter, a prep pack or a
+// thank-you note.
 type Draft struct {
 	ID                  int64
 	PursuitID, ItemID   *int64
 	Kind, Title, Status string
 	Text, Error         string
-	FileName            string       // set when a file (the tailored resume) comes with it
+	FileName            string       // set when a file (tailored resume, cover letter) comes with it
 	Answers             []kit.Answer // a kit's drafted answers for the application form
 	CreatedAt           time.Time
 	FinishedAt          *time.Time
@@ -69,6 +70,34 @@ func (d *Drafts) StartKit(ctx context.Context, p *Pursuit, itemID *int64, done D
 			return written{}, err
 		}
 		return written{result.Text, result.FileName, result.File, result.Answers}, nil
+	})
+}
+
+// StartCover writes a cover letter (DOCX) for p, or for a radar item when p is nil. instructions are the owner's
+// own words for this letter: why this company, what to stress, extra facts.
+func (d *Drafts) StartCover(ctx context.Context, p *Pursuit, itemID *int64, instructions string, done Done) (Draft, error) {
+	var (
+		job kit.Job
+		err error
+	)
+	switch {
+	case p != nil:
+		job, err = d.Pipeline.JobFor(ctx, p)
+		itemID = p.ItemID
+	case itemID != nil:
+		job, err = d.Pipeline.ItemJob(ctx, *itemID)
+	default:
+		return Draft{}, errors.New("a cover letter needs a pursuit or an item")
+	}
+	if err != nil {
+		return Draft{}, err
+	}
+	return d.start(ctx, "cover", "Cover letter: "+job.Title+" · "+job.Company, p, itemID, done, func(ctx context.Context) (written, error) {
+		letter, err := d.Kit.CoverLetter(ctx, job, instructions, d.Pipeline.Clock.Now().In(d.Pipeline.Location))
+		if err != nil {
+			return written{}, err
+		}
+		return written{letter.Text, letter.FileName, letter.File, letter.Answers}, nil
 	})
 }
 
@@ -239,6 +268,11 @@ func (d *Drafts) ForPursuit(ctx context.Context, p *Pursuit) ([]Draft, error) {
 		return d.query(ctx, `"PursuitId" = ? OR ("PursuitId" IS NULL AND "ItemId" = ?) ORDER BY "Id" DESC`, p.ID, *p.ItemID)
 	}
 	return d.query(ctx, `"PursuitId" = ? ORDER BY "Id" DESC`, p.ID)
+}
+
+// ForItem lists the drafts written for a radar item, newest first, whether or not it's a pursuit yet.
+func (d *Drafts) ForItem(ctx context.Context, itemID int64) ([]Draft, error) {
+	return d.query(ctx, `"ItemId" = ? ORDER BY "Id" DESC`, itemID)
 }
 
 // LatestKits maps radar item ids to their most recent apply kit, whatever its status.
