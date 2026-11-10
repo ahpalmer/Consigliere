@@ -1,8 +1,9 @@
 // Package config loads settings in layers, later layers winning:
 //
 //  1. config/consigliere.json (committed, no secrets)
-//  2. a secrets file outside the repo (flat "Section:Key" entries, the same format as .NET user-secrets)
-//  3. environment variables, "Section__Key" (e.g. Telegram__BotToken), as Kubernetes/Key Vault inject them
+//  2. a secrets file outside the repo (flat "Section:Key" entries, the same format as .NET user-secrets), or on the
+//     VM the same JSON read from Key Vault
+//  3. environment variables, "Section__Key" (e.g. Web__Listen), as the VM's systemd unit sets them
 package config
 
 import (
@@ -98,8 +99,8 @@ type Web struct {
 	Token string
 }
 
-// Backup copies the database to blob storage. Off unless ContainerUrl is set (in AKS, where the pod's workload
-// identity can write to the container).
+// Backup copies the database to blob storage. Off unless ContainerUrl is set (on the VM, whose managed identity can
+// write to the container).
 type Backup struct {
 	Cron         string
 	ContainerUrl string // e.g. https://<account>.blob.core.windows.net/backups
@@ -191,6 +192,18 @@ func defaults() map[string]any {
 
 // Load merges defaults, the JSON file (if it exists), the secrets file (if it exists), and the environment.
 func Load(configPath, secretsPath string, environ []string) (*Config, error) {
+	secrets := map[string]string{}
+	if secretsPath != "" {
+		var err error
+		if secrets, err = ReadSecrets(secretsPath); err != nil {
+			return nil, err
+		}
+	}
+	return LoadWithSecrets(configPath, secrets, environ)
+}
+
+// LoadWithSecrets is Load with the secrets already read (on the VM they come from Key Vault, not a file).
+func LoadWithSecrets(configPath string, secrets map[string]string, environ []string) (*Config, error) {
 	tree := defaults()
 
 	if raw, err := os.ReadFile(configPath); err == nil {
@@ -203,13 +216,7 @@ func Load(configPath, secretsPath string, environ []string) (*Config, error) {
 		return nil, err
 	}
 
-	if secretsPath != "" {
-		flat, err := ReadSecrets(secretsPath)
-		if err != nil {
-			return nil, err
-		}
-		merge(tree, unflatten(flat, ":"))
-	}
+	merge(tree, unflatten(secrets, ":"))
 
 	envFlat := map[string]string{}
 	for _, kv := range environ {
@@ -263,10 +270,22 @@ func ReadSecrets(path string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
+	flat, err := ParseSecrets(raw)
+	if err != nil {
+		return nil, fmt.Errorf("parse secrets %s: %w", path, err)
+	}
+	return flat, nil
+}
+
+// ParseSecrets reads the flat {"Section:Key": "value"} format, wherever it was stored.
+func ParseSecrets(raw []byte) (map[string]string, error) {
 	raw = []byte(strings.TrimPrefix(string(raw), "\xef\xbb\xbf")) // .NET writes a UTF-8 BOM
 	var flat map[string]string
 	if err := json.Unmarshal(raw, &flat); err != nil {
-		return nil, fmt.Errorf("parse secrets %s: %w", path, err)
+		return nil, err
+	}
+	if flat == nil {
+		flat = map[string]string{}
 	}
 	return flat, nil
 }

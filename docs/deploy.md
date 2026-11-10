@@ -1,193 +1,168 @@
-# Deploying to AKS
+# Deploying to Azure
 
-The agent runs as a single pod on a one-node AKS cluster. Nearly all of it is code:
+Each bot runs on its own small Linux VM, in its own resource group, with its own Key Vault, storage and identities, so
+two bots share nothing. The dashboard is reached over your tailnet at `https://<bot>.<tailnet>.ts.net`. Nearly all of
+it is code:
 
 | What | Where | Applied by |
 |---|---|---|
-| Azure resources: AKS, registry, Key Vault, backup storage, identities, role assignments, budget | `infra/*.bicep` | you, with `az deployment sub create` (first time, and when `infra/` changes) |
-| Kubernetes objects: namespace, disk, service account, Key Vault mounts, the Deployment | `deploy/k8s/` (Kustomize) | the `deploy` workflow, after CI passes on `main` |
-| Optional: the Tailscale operator and the dashboard on your tailnet | `deploy/k8s/tailscale/` | the `deploy` workflow, once set up ([below](#dashboard-on-your-tailnet)) |
-| The container image | `Dockerfile` | the `deploy` workflow |
+| Azure resources: VM, network, Key Vault, storage (backups, releases), identities, role assignments, budget | `infra/*.bicep`, one `.bicepparam` per bot | you, with `az deployment sub create` (first time, and when `infra/` changes) |
+| The VM's setup: Tailscale, the `consigliere` user, systemd units, the data pack sync, the release | `deploy/vm/` | the `deploy` workflow, through `az vm run-command` |
+| The release: Arm64 binary with the dashboard embedded, plus config | `deploy/package.sh` | the `deploy` workflow |
 | Secret values | Key Vault | you, with `deploy/push-secrets.sh` |
 
-A few things can't be code: the Azure subscription, the GitHub environment and variables, the deploy key on the data pack
-repo, and the secret values themselves. The one-time setup below covers them.
+| Bot | Branch | GitHub environment | Resource group | Infra parameters |
+|---|---|---|---|---|
+| The owner's | `main` | `production` | `rg-consigliere` | `infra/main.bicepparam` |
+| Alison's | `alison/main` | `alison` | `rg-consigliere-alison` | `infra/alison.bicepparam` |
+
+A few things can't be code: the Azure subscription, the GitHub environments and variables, the deploy key on each data
+pack repo, the Tailscale auth keys, and the secret values themselves. The one-time setup below covers them.
 
 ```mermaid
 flowchart LR
     gh[GitHub Actions] -- OIDC, no stored keys --> azure
-    subgraph azure[rg-consigliere]
-        acr[(Container registry)]
+    subgraph azure[rg-consigliere: one per bot]
         kv[(Key Vault)]
-        st[(Backup storage)]
-        subgraph aks[AKS, one node]
-            pod[consigliere pod<br/>app + data pack sync]
-            disk[(Disk: data pack clone + SQLite)]
+        st[(Storage: backups, releases)]
+        subgraph vm[VM, no inbound ports]
+            app[consigliere.service]
+            sync[consigliere-sync.timer]
+            ts[tailscaled]
         end
     end
-    gh -- push image --> acr
-    gh -- kubectl apply --> aks
-    acr --> pod
-    kv -- secrets file, deploy key --> pod
-    pod --> disk
-    pod -- nightly copy --> st
-    pod -- git fetch, read-only key --> pack[(Private data pack repo)]
-    pod -- outbound only --> apis([Telegram, Claude, Gmail, job boards])
+    gh -- upload release --> st
+    gh -- run-command: install.sh --> vm
+    st -- release, signed in as the VM --> vm
+    kv -- secrets into memory --> app
+    kv -- deploy key into memory --> sync
+    app -- nightly copy --> st
+    sync -- git fetch, read-only key --> pack[(Private data pack repo)]
+    app -- outbound only --> apis([Telegram, Claude, Gmail, job boards])
+    ts -- dashboard --> phone([Your devices on the tailnet])
 ```
 
 ## How it fits together
 
-- **One replica, no public ingress.** Telegram allows one long-poller per bot and SQLite has one writer, so the
-  Deployment runs exactly one pod and uses `Recreate`. Everything is outbound; nothing listens on the internet. The
-  dashboard is reached with `kubectl port-forward`, or privately over your tailnet ([below](#dashboard-on-your-tailnet)).
-- **Sign-in without stored keys.** GitHub Actions signs in to Azure over OIDC as `id-consigliere-github`, which only the
-  repository's `production` environment can use. The pod signs in as `id-consigliere-app` through workload identity.
-  The cluster takes Entra ID sign-in only: there are no local admin accounts and no shared kubeconfig.
-- **Secrets** live in Key Vault and are mounted as files. `consigliere-secrets` is the app's whole secrets file (the
-  same `"Section:Key"` JSON as on a laptop), and `datapack-deploy-key` is a read-only SSH key for the data pack repo.
-  The app and the sync containers each mount only their own.
-- **The data pack** is cloned onto the disk by an init container before the app starts. A sidecar then fetches it every
-  5 minutes, so a push to the data pack repo lands without a redeploy. The database lives at `db/` inside the clone, which
-  the pack gitignores, so syncing never touches it.
-- **The disk** uses a storage class that *retains* it: deleting the claim or the namespace doesn't delete the database.
+- **One agent per bot, no inbound ports.** Telegram allows one long-poller per bot and SQLite has one writer, so each
+  VM runs exactly one `consigliere.service`. The network security group has no allow rules; the app, Tailscale and the
+  deploys all connect out. Each bot has its own virtual network, so the VMs can't reach each other.
+- **Sign-in without stored keys.** GitHub Actions signs in to Azure over OIDC as the bot's `id-consigliere-github`, which
+  only that bot's GitHub environment can use and which reaches only that bot's resource group. The VM signs in as
+  `id-consigliere-app` through its managed identity.
+- **Secrets never touch the VM's disk.** The app starts with `--secrets keyvault://<vault>/consigliere-secrets` and
+  reads the secrets JSON (the same `"Section:Key"` file as on a laptop) straight into memory. The data pack sync reads
+  `datapack-deploy-key` into a directory that lives in memory for one run. Tailscale joins once with
+  `tailscale-auth-key`, held in memory only while `tailscale up` runs. `/etc/consigliere/env` holds names and URLs only.
+- **The data pack** is cloned to `/var/lib/consigliere/pack` and fetched every 5 minutes by a systemd timer, so a push
+  to the data pack repo lands without a redeploy. The database lives at `db/` inside the clone, which the pack
+  gitignores, so syncing never touches it.
+- **Deploys.** CI builds and tests every push. When it passes on a bot branch, the `deploy` workflow builds the release,
+  uploads it to the bot's `releases` container and runs `deploy/vm/install.sh` on the VM. The script installs the
+  release, reapplies the VM's whole setup (it's safe to rerun), restarts the agent and checks the dashboard answers. If
+  it doesn't, it rolls back to the previous release and the workflow fails.
+- **The dashboard** listens on loopback only. `tailscale serve` publishes it at `https://<bot>.<tailnet>.ts.net` with a
+  certificate from Tailscale. It's tailnet-only (not Funnel) and the dashboard's own sign-in still applies.
 - **Backups.** At 03:30 the app writes a consistent copy of the database (`VACUUM INTO`) and uploads it to the `backups`
   container. Blobs older than 30 days are deleted automatically, and accidental deletes can be undone for 7 days. A failed
   backup alerts you on Telegram like any other job. Storage account keys are turned off.
-- **Upgrades.** AKS applies Kubernetes patches and node image updates on Sundays from 07:00 to 11:00 UTC. The single node
-  restarts, so the agent is down for a few minutes.
+- **Updates.** Ubuntu installs security updates daily and reboots at 08:00 UTC when one needs it; the agent starts
+  again on boot. Tailscale is pinned in `deploy/vm/install.sh` like every other dependency.
+- **No SSH.** Azure requires a key on Linux VMs, so the VM gets `infra/no-login.pub`, whose private half was discarded.
+  Administration goes through `az vm run-command` (the scripts below), signed in with Azure.
 
 ## Cost
 
-Rough pay-as-you-go prices in East US 2, per month:
+Rough pay-as-you-go prices in East US 2, per bot, per month:
 
 | | |
 |---|---|
-| Node (`Standard_B2als_v2`: 2 vCPU, 4 GiB) | ~$27 |
-| Node OS disk (32 GiB) | ~$5 |
-| Load balancer and public IP (AKS needs them for outbound traffic) | ~$22 |
-| Container registry (Basic) | ~$5 |
-| Data disk (4 GiB), Key Vault, backup storage | ~$1 |
-| AKS control plane (Free tier) | $0 |
-| **Total** | **~$60** |
+| VM (`Standard_B2pts_v2`: 2 vCPU, 1 GiB, Arm64) | ~$6 |
+| OS disk (32 GiB Standard SSD) | ~$2.50 |
+| Public IP (outbound only) | ~$3.70 |
+| Key Vault, storage | <$1 |
+| **Total** | **~$12** |
 
-The budget in `infra/` emails you at 80% of `monthlyBudget` (default $75) and when the month's forecast passes 100%.
+The budget in `infra/` emails you at 80% of `monthlyBudget` (default $20) and when the month's forecast passes 100%.
 
-## One-time setup
+## One-time setup (per bot)
 
-Run these from the repo root in Git Bash, signed in to your **personal** Azure account.
+Run these from the repo root in Git Bash, signed in to your **personal** Azure account. For Alison's bot, use
+`infra/alison.bicepparam`, deployment name `consigliere-alison`, and `export CONSIGLIERE_RESOURCE_GROUP=rg-consigliere-alison`
+before the `deploy/` scripts.
 
 1. **Tools.** Install the Azure CLI (`winget install Microsoft.AzureCLI`), then `az login` and check
-   `az account show` is the right subscription. Run `az aks install-cli` to get kubectl and kubelogin.
+   `az account show` is the right subscription.
 
 2. **Resource providers.** New subscriptions may need these turned on:
    ```bash
-   for p in ContainerService ContainerRegistry KeyVault Storage ManagedIdentity Consumption; do az provider register -n Microsoft.$p; done
+   for p in Compute Network KeyVault Storage ManagedIdentity Consumption; do az provider register -n Microsoft.$p; done
    ```
 
-3. **Azure resources** (about 10 minutes). Personal values come from the environment, never from the repo:
+3. **Azure resources** (a few minutes). Personal values come from the environment, never from the repo:
    ```bash
    export CONSIGLIERE_OWNER_OBJECT_ID=$(az ad signed-in-user show --query id -o tsv)
    export CONSIGLIERE_BUDGET_EMAIL=<where budget alerts go>
-   az deployment sub what-if  -n consigliere -l eastus2 -f infra/main.bicep -p infra/main.bicepparam   # preview
-   az deployment sub create   -n consigliere -l eastus2 -f infra/main.bicep -p infra/main.bicepparam --query properties.outputs
+   az deployment sub what-if -n consigliere -l eastus2 -f infra/main.bicep -p infra/main.bicepparam   # preview
+   az deployment sub create  -n consigliere -l eastus2 -f infra/main.bicep -p infra/main.bicepparam --query properties.outputs
    ```
-   Keep the outputs; steps 5 and 6 use them. If the node size isn't available or you lack quota, add
-   `-p nodeVmSize=Standard_B2s_v2` (8 GiB, about twice the price).
+   Keep the outputs; step 7 uses them.
 
-4. **Data pack deploy key.** This key can only read the data pack repo:
+4. **Data pack deploy key.** This key can only read the bot's data pack repo:
    ```bash
    ssh-keygen -t ed25519 -N "" -C consigliere-datapack -f datapack-key
    ```
    On GitHub, open the data pack repo → Settings → Deploy keys → Add deploy key. Paste `datapack-key.pub` and leave
    *Allow write access* off.
 
-5. **Secrets.** The cluster runs with the dashboard reachable from inside the cluster, so it needs a sign-in token. Find
-   your secrets file (the first line of `secrets list`), then add the token and push both secrets:
+5. **Secrets.** The dashboard is reachable from the tailnet, so it needs a sign-in token. Find the bot's secrets file
+   (the first line of `secrets list`), add the token and push both secrets:
    ```bash
    go run ./cmd/consigliere secrets list
    go run ./cmd/consigliere secrets set "Web:Token" "$(openssl rand -base64 32)"
    bash deploy/push-secrets.sh "<path to secrets.json>" datapack-key
    rm datapack-key datapack-key.pub   # Key Vault holds the only copy now
    ```
-   With a token set, the local dashboard asks for it too (once per browser).
 
-6. **GitHub.** In the repository's Settings:
-   - **Environments** → New environment `production`. Under *Deployment branches*, choose *Selected branches* and add
-     `main`.
-   - In the `production` environment, under **Environment secrets**, add `AZURE_CLIENT_ID` (the `githubClientId`
-     output), `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `DATA_PACK_REPO` (the data pack's SSH clone URL,
+6. **Tailscale.** In the admin console → Settings → Keys → *Generate auth key*: not reusable, tagged (e.g. `tag:k8s`,
+   or a `tag:consigliere` you add to the policy's `tagOwners`), so the VM's key never expires. Then save it without
+   echoing it:
+   ```bash
+   bash deploy/push-secrets.sh --tailscale-auth-key
+   ```
+   It's used once, when the VM first joins. Under DNS, MagicDNS and HTTPS Certificates must be on.
+
+7. **GitHub.** In the repository's Settings:
+   - **Environments** → New environment (`production` for `main`, `alison` for `alison/main`). Under *Deployment
+     branches*, choose *Selected branches* and add the bot's branch.
+   - In that environment, under **Environment secrets**, add `AZURE_CLIENT_ID` (the `githubClientId` output),
+     `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `DATA_PACK_REPO` (the bot's data pack SSH clone URL,
      `git@github.com:<you>/<repo>.git`). They're identifiers that grant nothing on their own, but as secrets they're
      masked in the public repo's Actions logs.
-   - **Secrets and variables → Actions → Variables → New repository variable**: `DEPLOY_ENABLED` = `true`. This turns
-     on the deploy workflow (it skips itself until then).
+   - **Secrets and variables → Actions → Variables**: repository variable `DEPLOY_ENABLED` = `true` (once, for both).
+   - **Rules → Rulesets**: protect `main` and `alison/main` (no deletion, no force push, changes by pull request, the
+     `ci` checks must pass).
 
-7. **First deploy.** Stop the agent on your laptop first: two copies polling one bot fight over every message. Then
-   open Actions → deploy → Run workflow on `main`. From now on, every push to `main` that passes CI deploys itself.
-
-8. **Move the database.** With the laptop agent stopped (so its database is fully written), copy it into the cluster:
+8. **First deploy.** Stop any other copy of the bot first: two copies polling one bot fight over every message. Then
+   open Actions → deploy → Run workflow on the bot's branch. From now on, every push to that branch that passes CI
+   deploys itself. To bring an existing database along, deploy once by hand instead, naming a backup to load:
    ```bash
-   az aks get-credentials -g rg-consigliere -n aks-consigliere && kubelogin convert-kubeconfig -l azurecli
-   bash deploy/restore-db.sh ../Consigliere-data/db/consigliere.db
+   (cd web && npm ci && npm run build) && bash deploy/package.sh dist/consigliere.tar.gz
+   RESTORE_BLOB=<blob in the backups container> DATA_PACK_REPO=<ssh url> bash deploy/deploy.sh dist/consigliere.tar.gz
    ```
-   Then send the bot `/status` from your phone.
+   Then send the bot `/status` from your phone and open `https://<bot>.<tailnet>.ts.net`.
 
 ## Day to day
 
 | To | Do |
 |---|---|
-| Ship a change | Push to `main`. CI runs, then `deploy` builds the image, applies `deploy/k8s` and waits for the pod. |
-| Open the dashboard | `deploy/dashboard.ps1` (Windows): signs in if needed, opens the tunnel, copies `Web:Token` to the clipboard and opens the browser; Ctrl+C closes it. By hand: `kubectl -n consigliere port-forward svc/consigliere 8081:8080`, then http://localhost:8081 and sign in with `Web:Token`. |
-| Read logs | `kubectl -n consigliere logs deploy/consigliere` (add `-c datapack-sync` for the sync sidecar). |
-| Change the data pack | Push to the data pack repo; the pod picks it up within 5 minutes. |
-| Change a secret | `secrets set` locally, `bash deploy/push-secrets.sh <file>`, then `kubectl -n consigliere rollout restart deploy/consigliere`. |
-| Run the agent locally for a while | `kubectl -n consigliere scale deploy/consigliere --replicas=0` first, and `--replicas=1` when you're done. |
-| Change Azure resources | Edit `infra/`, then rerun the `what-if` and `create` commands from step 3. |
-| Restore a backup | `az storage blob list --auth-mode login --account-name <storageAccountName> -c backups -o table`, then `az storage blob download --auth-mode login --account-name <storageAccountName> -c backups -n <blob> -f restore.db` and `bash deploy/restore-db.sh restore.db`. The replaced file is kept on the disk as `consigliere.db.before-restore`. |
-| Open the dashboard from your phone | With the tailnet set up ([below](#dashboard-on-your-tailnet)): Tailscale on, then `https://consigliere.<tailnet>.ts.net`. |
-| Tear everything down | Download a backup, then `az group delete -n rg-consigliere`. This also removes the node resource group and the disk. Key Vault stays recoverable for 7 days (`az keyvault purge` removes it sooner). |
-
-## Dashboard on your tailnet
-
-Optional: the [Tailscale Kubernetes operator](https://tailscale.com/kb/1236/kubernetes-operator) publishes the dashboard
-at `https://consigliere.<tailnet>.ts.net`, reachable from your own devices running Tailscale (phone included) without a
-tunnel. It's tailnet-only (not Funnel), the dashboard's sign-in still applies, and the cluster still has no public
-endpoint: the proxy connects out to Tailscale like any other device.
-
-- `deploy/k8s/tailscale/operator.yaml` is Tailscale's static manifest, unmodified and pinned (the version is in its
-  `kustomization.yaml`, which also pins the images and swaps the manifest's placeholder Secret for Key Vault).
-- The operator signs in to Azure as `id-consigliere-tailscale`, which can read two Key Vault secrets and nothing else:
-  `tailscale-oauth-client-id` and `tailscale-oauth-client-secret`. It never sees the app's secrets, and the app never
-  sees these.
-- `deploy/deploy.sh` applies it only once the infra outputs `tailscaleClientId`, so until you've set it up, deploys skip it.
-
-Setup, once:
-
-1. **Tailscale policy.** In the admin console → Access controls, let the operator own its proxies:
-   ```json
-   "tagOwners": {
-     "tag:k8s-operator": [],
-     "tag:k8s": ["tag:k8s-operator"]
-   }
-   ```
-   Under DNS, turn on MagicDNS and HTTPS Certificates.
-2. **OAuth client.** Settings → Trust credentials → new OAuth credential, *Custom scopes*: **Write** on Devices → Core,
-   Keys → Auth Keys, and General → Services, each tagged `tag:k8s-operator`.
-3. **Key Vault.** Save its two values without printing them (PowerShell):
-   ```powershell
-   $vault = az deployment group show -g rg-consigliere -n consigliere --query properties.outputs.keyVaultName.value -o tsv
-   $f = New-TemporaryFile
-   foreach ($name in 'tailscale-oauth-client-id', 'tailscale-oauth-client-secret') {
-     $v = Read-Host "Paste $name" -AsSecureString
-     [Net.NetworkCredential]::new('', $v).Password | Set-Content -NoNewline $f
-     az keyvault secret set --vault-name $vault --name $name --file $f --encoding utf-8 -o none
-   }
-   Remove-Item $f
-   ```
-4. **Infra.** Rerun the `what-if` and `create` commands from step 3 of the one-time setup. They add the identity, its
-   federation to the `tailscale/operator` service account, and read access to those two secrets (the secrets must exist
-   first).
-5. **Deploy.** Push to `main`, or Actions → deploy → Run workflow. Then `kubectl -n tailscale get pods` shows the operator
-   and a proxy, and the admin console shows `tailscale-operator` and `consigliere` as devices.
-
-To rotate the OAuth client, create a new one, rerun step 3, and `kubectl -n tailscale rollout restart deploy/operator`.
-To remove it all: `kubectl delete -k deploy/k8s/tailscale`, then delete the two devices in the admin console.
+| Ship a change to a bot | Push (or merge a pull request) to its branch. CI runs, then `deploy` installs it and checks it came up. |
+| Ship the same change to both | Land it on `main`, then open a pull request from `main` into `alison/main`. |
+| Open the dashboard | `deploy/dashboard.ps1` (Windows; `-ResourceGroup rg-consigliere-alison` for Alison's): copies `Web:Token` to the clipboard for a minute and opens `https://<bot>.<tailnet>.ts.net`. From a phone: Tailscale on, then the same address. |
+| Read logs | `az vm run-command invoke -g rg-consigliere -n consigliere --command-id RunShellScript --scripts "journalctl -u consigliere -n 100 --no-pager" --query "value[0].message" -o tsv` (`-u consigliere-sync` for the data pack sync). |
+| Change the data pack | Push to the data pack repo; the VM picks it up within 5 minutes. |
+| Change a secret | `secrets set` locally, `bash deploy/push-secrets.sh <file>`, then `bash deploy/restart.sh`. |
+| Run the agent locally for a while | Stop the VM's agent first (`az vm run-command invoke ... --scripts "systemctl stop consigliere"`), and `bash deploy/restart.sh` when you're done. |
+| Change Azure resources | Edit `infra/`, then rerun the `what-if` and `create` commands from step 3 for each bot. |
+| Restore a backup | `az storage blob list --auth-mode login --account-name <storageAccountName> -c backups -o table`, then `bash deploy/restore-db.sh <blob name>` (or `<file.db>` to upload a local one). The replaced file is kept on the VM as `consigliere.db.before-restore`. |
+| Tear a bot down | Download a backup, then `az group delete -n <resource group>` and remove the device in the Tailscale admin console. Key Vault stays recoverable for 7 days (`az keyvault purge` removes it sooner). |

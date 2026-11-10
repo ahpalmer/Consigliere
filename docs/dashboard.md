@@ -1,7 +1,7 @@
 # The dashboard
 
 A React + TypeScript app (`web/`) served by the agent itself. `npm run build` writes it into `internal/web/dist`, and
-`go build` embeds that folder, so the binary (and the container) carry the app. There's no separate web server.
+`go build` embeds that folder, so the binary carries the app. There's no separate web server.
 
 | Page | What it's for |
 |---|---|
@@ -41,10 +41,9 @@ go run ./cmd/consigliere secrets set "Web:Token" "$(openssl rand -base64 32)"
 The dashboard can do everything the owner can (except send anything: there is still no submit or send tool), so it's
 built to be reachable only privately:
 
-- **Network.** Loopback by default. In AKS there's no public ingress: the manifest sets `Web:Listen` to `0.0.0.0:8080`
-  inside the pod, `Web:Token` comes from Key Vault, and you reach it with `kubectl port-forward` or, optionally, from your
-  own devices over Tailscale at `https://consigliere.<tailnet>.ts.net`
-  ([deploy.md](deploy.md#dashboard-on-your-tailnet)).
+- **Network.** Loopback only. On the VM, `tailscale serve` publishes it to your own devices at
+  `https://<bot>.<tailnet>.ts.net` (not Funnel, and the VM has no inbound ports), and `Web:Token` comes from Key Vault
+  ([deploy.md](deploy.md)).
 - **Sign-in.** With a token set, every API call needs the session cookie (HttpOnly, SameSite=Strict, an HMAC derived from
   the token, so rotating the token signs everyone out) or `Authorization: Bearer <token>`. Wrong tokens cost a second.
 - **No token, loopback only.** Without a token the API also checks the `Host` header, so a web page that rebinds its

@@ -1,46 +1,27 @@
 #!/usr/bin/env bash
-# Deploys an image that's already in the registry: fills in deploy/k8s with the Azure names from the infra
-# deployment's outputs, applies it, and waits for the new pod. The deploy workflow runs this; so can you.
+# Ships a release (deploy/package.sh) to a bot's VM: uploads it to the bot's releases container, then runs
+# deploy/vm/install.sh on the VM, which installs it, applies the VM's setup and checks the app came up (rolling back
+# if not). The deploy workflow runs this; so can you.
 #
-#   DATA_PACK_REPO=git@github.com:<you>/<data-pack>.git deploy/deploy.sh <image tag>
+#   DATA_PACK_REPO=git@github.com:<you>/<data-pack>.git deploy/deploy.sh <release.tar.gz> [release name]
 #
-# Needs: az signed in, kubectl pointed at the cluster (az aks get-credentials), bash.
+# CONSIGLIERE_RESOURCE_GROUP picks the bot (default rg-consigliere). RESTORE_BLOB=<backup blob> loads that backup if
+# the VM has no database yet, for moving a bot to a new VM. Needs: az signed in, bash.
 set -euo pipefail
+
+file=$(realpath "${1:?usage: deploy/deploy.sh <release.tar.gz> [release name]}")
 cd "$(dirname "$0")/.."
-
-tag=${1:?usage: deploy/deploy.sh <image tag>}
+release=${2:-consigliere-$(git rev-parse --short=12 HEAD)}
 : "${DATA_PACK_REPO:?set DATA_PACK_REPO to the SSH clone URL of the data pack}"
-rg=${CONSIGLIERE_RESOURCE_GROUP:-rg-consigliere}
+# shellcheck source=deploy/lib.sh
+. deploy/lib.sh
+bot_outputs
 
-outputs=$(az deployment group show -g "$rg" -n consigliere --query \
-  "[properties.outputs.acrLoginServer.value, properties.outputs.appClientId.value, properties.outputs.keyVaultName.value, properties.outputs.backupContainerUrl.value]" \
-  -o tsv | tr '\r\n' '  ')
-read -r registry client_id vault backups <<<"$outputs"
-tenant_id=$(az account show --query tenantId -o tsv | tr -d '\r')
+echo "Uploading $release to $storage"
+az storage blob upload --auth-mode login --account-name "$storage" -c releases -n "$release.tar.gz" \
+  -f "$(native "$file")" --overwrite --only-show-errors -o none
 
-# Gitignored; only ever holds names and IDs, never secrets.
-cat >deploy/k8s/azure.env <<EOF
-IMAGE=$registry/consigliere:$tag
-APP_CLIENT_ID=$client_id
-TENANT_ID=$tenant_id
-KEY_VAULT_NAME=$vault
-DATA_PACK_REPO=$DATA_PACK_REPO
-Backup__ContainerUrl=$backups
-EOF
-
-kubectl apply -k deploy/k8s
-kubectl -n consigliere rollout status deployment/consigliere --timeout=5m
-
-# The Tailscale operator (dashboard on the tailnet) comes once the infra has its identity; until then it's skipped.
-tailscale_id=$(az deployment group show -g "$rg" -n consigliere --query properties.outputs.tailscaleClientId.value -o tsv | tr -d '\r')
-if [[ -n $tailscale_id && $tailscale_id != None ]]; then
-  cat >deploy/k8s/tailscale/azure.env <<EOF
-TAILSCALE_CLIENT_ID=$tailscale_id
-TENANT_ID=$tenant_id
-KEY_VAULT_NAME=$vault
-EOF
-  kubectl apply -k deploy/k8s/tailscale
-  kubectl -n tailscale rollout status deployment/operator --timeout=5m
-else
-  echo "No tailscaleClientId in the infra outputs yet: skipping the Tailscale operator (docs/deploy.md, 'Dashboard on your tailnet')."
-fi
+echo "Installing on $vm"
+run_on_vm deploy/vm/install.sh CONSIGLIERE_INSTALL_OK \
+  "RELEASE_URL=$releases/$release.tar.gz" "KEY_VAULT_NAME=$vault" "AZURE_CLIENT_ID=$client_id" \
+  "BACKUP_CONTAINER_URL=$backups" "DATA_PACK_REPO=$DATA_PACK_REPO" "TS_HOSTNAME=$vm" "RESTORE_BLOB=${RESTORE_BLOB:-}"

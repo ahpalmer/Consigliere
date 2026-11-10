@@ -83,6 +83,6 @@ mailbox, so a kit can't reach anyone else. The messages carry an `X-Consigliere`
 them. If delivery fails, chat says why; the kit itself still arrives in chat.
 
 A sign-in saved before this existed can only read. To add the permission, run `go run ./cmd/consigliere auth gmail`
-again, then push the secrets to Key Vault and restart the pod (docs/deploy.md, "Change a secret").
+again, then push the secrets to Key Vault and restart the agent (docs/deploy.md, "Change a secret").
 
 To revoke access: myaccount.google.com/permissions (dedicated account), or delete the forwarding filter.

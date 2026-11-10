@@ -1,0 +1,45 @@
+# The agent. Exactly one runs per bot: Telegram allows one long-poller per bot token, and SQLite one writer.
+# Installed by deploy/vm/install.sh; names and URLs come from /etc/consigliere/env, secrets straight from Key Vault.
+[Unit]
+Description=Consigliere agent
+Wants=network-online.target
+After=network-online.target consigliere-sync.service
+
+[Service]
+User=consigliere
+Group=consigliere
+EnvironmentFile=/etc/consigliere/env
+WorkingDirectory=/opt/consigliere/current
+ExecStart=/opt/consigliere/current/consigliere --secrets keyvault://${KEY_VAULT_NAME}/consigliere-secrets
+Restart=always
+RestartSec=10
+TimeoutStopSec=40
+StateDirectory=consigliere
+StateDirectoryMode=0700
+UMask=0077
+MemoryMax=700M
+
+# It only needs its own state directory, outbound network and loopback for the dashboard.
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target

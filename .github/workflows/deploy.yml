@@ -1,43 +1,62 @@
 name: deploy
 
-# Ships main to AKS once CI has passed on it, or on demand (Actions → deploy → Run workflow). Signs in to Azure over
-# OIDC as the GitHub identity from infra/ (no stored credentials). The Azure IDs are production environment secrets,
-# not because they grant access but so they're masked in this public repo's logs. Until the DEPLOY_ENABLED repository
-# variable is 'true' it skips itself, so it never fails just because there's nothing to deploy to yet (a job's `if`
-# can't read secrets).
+# Ships a bot's branch to that bot's VM once CI has passed on it, or on demand (Actions → deploy → Run workflow):
+#
+#   main         → the "production" environment → the owner's VM (rg-consigliere)
+#   alison/main  → the "alison" environment     → Alison's VM   (rg-consigliere-alison)
+#
+# Each environment signs in to Azure over OIDC as its own bot's GitHub identity (infra/), which can reach only that
+# bot's resource group: no stored credentials, and one bot's deploy can't touch the other. The Azure IDs are
+# environment secrets, not because they grant access but so they're masked in this public repo's logs. Until the
+# DEPLOY_ENABLED repository variable is 'true' it skips itself (a job's `if` can't read secrets).
 on:
   workflow_run:
     workflows: [ci]
     types: [completed]
-    branches: [main]
+    branches: [main, alison/main]
   workflow_dispatch:
 
 permissions:
   contents: read
   id-token: write # OIDC token for the Azure sign-in
 
-concurrency:
-  group: deploy
-  cancel-in-progress: false
-
 jobs:
   deploy:
-    # Only pushes to this repository's main: a pull request from a fork whose branch is also called "main" must
-    # never reach the production credentials.
+    # Only pushes to this repository's bot branches: a pull request from a fork whose branch has the same name must
+    # never reach the deploy credentials. (On workflow_run, github.ref is always the default branch; the branch
+    # that passed CI is head_branch.)
     if: >-
-      vars.DEPLOY_ENABLED == 'true' && github.ref == 'refs/heads/main' &&
+      vars.DEPLOY_ENABLED == 'true' &&
+      contains(fromJSON('["main", "alison/main"]'), github.event.workflow_run.head_branch || github.ref_name) &&
       (github.event_name == 'workflow_dispatch' ||
        (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' &&
         github.event.workflow_run.head_repository.full_name == github.repository))
     runs-on: ubuntu-latest
-    environment: production
+    environment: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'main' && 'production' || 'alison' }}
+    concurrency:
+      group: deploy-${{ github.event.workflow_run.head_branch || github.ref_name }}
+      cancel-in-progress: false
     env:
       SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
-      RG: rg-consigliere
+      CONSIGLIERE_RESOURCE_GROUP: ${{ (github.event.workflow_run.head_branch || github.ref_name) == 'main' && 'rg-consigliere' || 'rg-consigliere-alison' }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.SHA }}
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the release
+        run: |
+          (cd web && npm ci && npm run build)
+          bash deploy/package.sh dist/consigliere.tar.gz
 
       - uses: azure/login@v2
         with:
@@ -45,20 +64,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      - name: Build and push the image
-        run: |
-          registry=$(az deployment group show -g "$RG" -n consigliere --query properties.outputs.acrLoginServer.value -o tsv)
-          az acr login -n "${registry%%.*}"
-          docker build -t "$registry/consigliere:$SHA" .
-          docker push "$registry/consigliere:$SHA"
-
-      - name: Connect to the cluster
-        run: |
-          sudo az aks install-cli --only-show-errors
-          az aks get-credentials -g "$RG" -n aks-consigliere --overwrite-existing
-          kubelogin convert-kubeconfig -l azurecli
-
       - name: Deploy
         env:
           DATA_PACK_REPO: ${{ secrets.DATA_PACK_REPO }}
-        run: bash deploy/deploy.sh "$SHA"
+        run: bash deploy/deploy.sh dist/consigliere.tar.gz "consigliere-${SHA::12}"

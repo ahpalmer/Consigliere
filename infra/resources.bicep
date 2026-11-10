@@ -1,153 +1,165 @@
-// The resource group's contents. Deployed by main.bicep; the deploy script reads this deployment's outputs.
+// The resource group's contents for one bot. Deployed by main.bicep; deploy/deploy.sh reads this deployment's outputs.
 
 param location string
+param botName string
 param ownerObjectId string
 param githubRepository string
-param nodeVmSize string
+param githubEnvironment string
+param vmSize string
 param monthlyBudget int
 param budgetEmail string
 param budgetStartDate string
 
-// The app's Kubernetes identity: namespace and service account in deploy/k8s.
-var appServiceAccount = 'system:serviceaccount:consigliere:consigliere'
-// The Tailscale operator's (deploy/k8s/tailscale), and the two Key Vault secrets it may read (its OAuth client).
-var tailscaleServiceAccount = 'system:serviceaccount:tailscale:operator'
-var tailscaleSecretNames = ['tailscale-oauth-client-id', 'tailscale-oauth-client-secret']
 var suffix = uniqueString(resourceGroup().id)
 
 // Built-in role definitions: public IDs, the same in every tenant. gitleaks mistakes the "Secrets" ones for keys.
 var roles = {
   reader: 'acdd72a7-3385-48ef-bd42-f606fba81ae7'
-  acrPull: '7f951dda-4ed3-4680-a7ca-43fe172d538d'
-  acrPush: '8311e382-0749-4cb8-b61a-304f252e45ec'
-  aksClusterUser: '4abbcc35-e782-43d8-92c5-2d3f1bd2253f'
-  aksRbacClusterAdmin: 'b1ff04bb-8a4e-4dc4-8eb5-8693973ce19b'
+  vmContributor: '9980e02c-c2be-4d73-94e8-173b1dc7cf3c'
   keyVaultSecretsUser: '4633458b-17de-408a-b874-0445c86b69e6' // gitleaks:allow
   keyVaultSecretsOfficer: 'b86a8fe4-44ce-4948-aee5-eccb2c155cd7' // gitleaks:allow
   blobDataContributor: 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
   blobDataReader: '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 }
 
-// ---------- Cluster ----------
+// ---------- Network ----------
 
-// Free tier, one node, no public ingress: the app only makes outbound calls (Telegram long-polling, APIs), and the
-// dashboard is reached with kubectl port-forward or, privately, over the owner's tailnet (deploy/k8s/tailscale). Sign-in is Entra ID only (no local admin kubeconfig).
-resource aks 'Microsoft.ContainerService/managedClusters@2024-09-01' = {
-  name: 'aks-consigliere'
+// Each bot has its own network, so two bots' VMs can't reach each other. Nothing comes in from the internet: the
+// NSG has no allow rules (Azure's defaults deny inbound), and the app, Tailscale and the deploys all connect out.
+resource nsg 'Microsoft.Network/networkSecurityGroups@2024-05-01' = {
+  name: 'nsg-${botName}'
   location: location
-  sku: {
-    name: 'Base'
-    tier: 'Free'
-  }
-  identity: {
-    type: 'SystemAssigned'
-  }
   properties: {
-    dnsPrefix: 'consigliere'
-    nodeResourceGroup: '${resourceGroup().name}-nodes'
-    disableLocalAccounts: true
-    aadProfile: {
-      managed: true
-      enableAzureRBAC: true
+    securityRules: []
+  }
+}
+
+resource vnet 'Microsoft.Network/virtualNetworks@2024-05-01' = {
+  name: 'vnet-${botName}'
+  location: location
+  properties: {
+    addressSpace: {
+      addressPrefixes: ['10.40.0.0/24']
     }
-    oidcIssuerProfile: {
-      enabled: true
-    }
-    securityProfile: {
-      workloadIdentity: {
-        enabled: true
-      }
-    }
-    addonProfiles: {
-      // Mounts Key Vault secrets into pods as files.
-      azureKeyvaultSecretsProvider: {
-        enabled: true
-        config: {
-          enableSecretRotation: 'true'
-          rotationPollInterval: '2m'
-        }
-      }
-    }
-    autoUpgradeProfile: {
-      upgradeChannel: 'patch'
-      nodeOSUpgradeChannel: 'NodeImage'
-    }
-    networkProfile: {
-      networkPlugin: 'azure'
-      networkPluginMode: 'overlay'
-      loadBalancerSku: 'standard'
-      outboundType: 'loadBalancer'
-    }
-    agentPoolProfiles: [
+    subnets: [
       {
-        name: 'system'
-        mode: 'System'
-        count: 1
-        vmSize: nodeVmSize
-        osType: 'Linux'
-        osSKU: 'AzureLinux'
-        osDiskType: 'Managed'
-        osDiskSizeGB: 32
-        type: 'VirtualMachineScaleSets'
+        name: 'vm'
+        properties: {
+          addressPrefix: '10.40.0.0/27'
+          networkSecurityGroup: {
+            id: nsg.id
+          }
+        }
       }
     ]
   }
 }
 
-// Upgrades and node image updates restart the only node, so keep them to early Sunday morning (US Eastern).
-resource upgradeWindow 'Microsoft.ContainerService/managedClusters/maintenanceConfigurations@2024-09-01' = {
-  parent: aks
-  name: 'aksManagedAutoUpgradeSchedule'
-  properties: {
-    maintenanceWindow: {
-      schedule: {
-        weekly: {
-          dayOfWeek: 'Sunday'
-          intervalWeeks: 1
-        }
-      }
-      durationHours: 4
-      startTime: '07:00'
-      utcOffset: '+00:00'
-    }
-  }
-}
-
-resource nodeOsWindow 'Microsoft.ContainerService/managedClusters/maintenanceConfigurations@2024-09-01' = {
-  parent: aks
-  name: 'aksManagedNodeOSUpgradeSchedule'
-  dependsOn: [upgradeWindow] // the cluster takes one change at a time
-  properties: {
-    maintenanceWindow: {
-      schedule: {
-        weekly: {
-          dayOfWeek: 'Sunday'
-          intervalWeeks: 1
-        }
-      }
-      durationHours: 4
-      startTime: '07:00'
-      utcOffset: '+00:00'
-    }
-  }
-}
-
-// ---------- Images ----------
-
-resource acr 'Microsoft.ContainerRegistry/registries@2023-07-01' = {
-  name: 'acrconsigliere${suffix}'
+// For outbound traffic only (new subnets get no default outbound access, and a NAT gateway costs ~8x more).
+resource publicIp 'Microsoft.Network/publicIPAddresses@2024-05-01' = {
+  name: 'pip-${botName}'
   location: location
   sku: {
-    name: 'Basic'
+    name: 'Standard'
   }
   properties: {
-    adminUserEnabled: false
+    publicIPAllocationMethod: 'Static'
+  }
+}
+
+resource nic 'Microsoft.Network/networkInterfaces@2024-05-01' = {
+  name: 'nic-${botName}'
+  location: location
+  properties: {
+    ipConfigurations: [
+      {
+        name: 'ipconfig'
+        properties: {
+          subnet: {
+            id: vnet.properties.subnets[0].id
+          }
+          privateIPAllocationMethod: 'Dynamic'
+          publicIPAddress: {
+            id: publicIp.id
+          }
+        }
+      }
+    ]
+  }
+}
+
+// ---------- VM ----------
+
+// One small Arm64 VM. deploy/vm/install.sh (run through `az vm run-command`, from the deploy workflow) sets up
+// everything on it: the app's systemd service, the data pack sync and Tailscale, which serves the dashboard on the
+// owner's tailnet. Nobody signs in over SSH: Azure requires a key, so it gets one whose private half was discarded.
+resource vm 'Microsoft.Compute/virtualMachines@2024-07-01' = {
+  name: botName
+  location: location
+  identity: {
+    type: 'UserAssigned'
+    userAssignedIdentities: {
+      '${appIdentity.id}': {}
+    }
+  }
+  properties: {
+    hardwareProfile: {
+      vmSize: vmSize
+    }
+    storageProfile: {
+      imageReference: {
+        publisher: 'Canonical'
+        offer: 'ubuntu-24_04-lts'
+        sku: 'server-arm64'
+        version: 'latest'
+      }
+      osDisk: {
+        createOption: 'FromImage'
+        diskSizeGB: 32
+        managedDisk: {
+          storageAccountType: 'StandardSSD_LRS'
+        }
+        deleteOption: 'Delete'
+      }
+    }
+    osProfile: {
+      computerName: botName
+      #disable-next-line adminusername-should-not-be-literal // no one signs in as it (see above)
+      adminUsername: 'azureuser'
+      linuxConfiguration: {
+        disablePasswordAuthentication: true
+        ssh: {
+          publicKeys: [
+            {
+              path: '/home/azureuser/.ssh/authorized_keys'
+              keyData: loadTextContent('no-login.pub')
+            }
+          ]
+        }
+      }
+    }
+    networkProfile: {
+      networkInterfaces: [
+        {
+          id: nic.id
+          properties: {
+            deleteOption: 'Delete'
+          }
+        }
+      ]
+    }
+    diagnosticsProfile: {
+      bootDiagnostics: {
+        enabled: true // managed storage; the serial log helps if the VM ever doesn't come up
+      }
+    }
   }
 }
 
 // ---------- Secrets ----------
 
-// Holds the app's secrets file and the data pack deploy key (docs/deploy.md). Access is by RBAC role only.
+// Holds the app's secrets file, the data pack deploy key and the one-time Tailscale auth key (docs/deploy.md). Access
+// is by RBAC role only, and the VM reads them into memory: nothing secret is written to its disk.
 resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   name: 'kv-consigliere-${take(suffix, 6)}'
   location: location
@@ -163,7 +175,7 @@ resource vault 'Microsoft.KeyVault/vaults@2023-07-01' = {
   }
 }
 
-// ---------- Backups ----------
+// ---------- Storage: backups and releases ----------
 
 resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
   name: 'stconsigliere${take(suffix, 8)}'
@@ -197,7 +209,13 @@ resource backupContainer 'Microsoft.Storage/storageAccounts/blobServices/contain
   name: 'backups'
 }
 
-resource backupRetention 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
+// Each deploy uploads the build here, and the VM downloads it with its own identity.
+resource releaseContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  parent: blobService
+  name: 'releases'
+}
+
+resource retention 'Microsoft.Storage/storageAccounts/managementPolicies@2023-05-01' = {
   parent: storage
   name: 'default'
   properties: {
@@ -221,6 +239,24 @@ resource backupRetention 'Microsoft.Storage/storageAccounts/managementPolicies@2
             }
           }
         }
+        {
+          name: 'expire-releases'
+          enabled: true
+          type: 'Lifecycle'
+          definition: {
+            filters: {
+              blobTypes: ['blockBlob']
+              prefixMatch: ['releases/']
+            }
+            actions: {
+              baseBlob: {
+                delete: {
+                  daysAfterModificationGreaterThan: 30
+                }
+              }
+            }
+          }
+        }
       ]
     }
   }
@@ -228,39 +264,13 @@ resource backupRetention 'Microsoft.Storage/storageAccounts/managementPolicies@2
 
 // ---------- Identities ----------
 
-// The app's pod signs in as this identity (workload identity): it reads Key Vault and writes backups.
+// The VM's identity: the app and its scripts read Key Vault, write backups and download releases as this.
 resource appIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-consigliere-app'
   location: location
 }
 
-resource appFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
-  parent: appIdentity
-  name: 'aks-service-account'
-  properties: {
-    issuer: aks.properties.oidcIssuerProfile.issuerURL
-    subject: appServiceAccount
-    audiences: ['api://AzureADTokenExchange']
-  }
-}
-
-// The Tailscale operator signs in as this identity to read its OAuth client from Key Vault, and nothing else.
-resource tailscaleIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
-  name: 'id-consigliere-tailscale'
-  location: location
-}
-
-resource tailscaleFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
-  parent: tailscaleIdentity
-  name: 'aks-service-account'
-  properties: {
-    issuer: aks.properties.oidcIssuerProfile.issuerURL
-    subject: tailscaleServiceAccount
-    audiences: ['api://AzureADTokenExchange']
-  }
-}
-
-// GitHub Actions signs in as this identity over OIDC, only from the repository's "production" environment.
+// GitHub Actions signs in as this identity over OIDC, only from this bot's GitHub environment.
 resource githubIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' = {
   name: 'id-consigliere-github'
   location: location
@@ -268,28 +278,17 @@ resource githubIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-0
 
 resource githubFederation 'Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31' = {
   parent: githubIdentity
-  name: 'github-production'
+  name: 'github-${githubEnvironment}'
   properties: {
     issuer: 'https://token.actions.githubusercontent.com'
-    subject: 'repo:${githubRepository}:environment:production'
+    subject: 'repo:${githubRepository}:environment:${githubEnvironment}'
     audiences: ['api://AzureADTokenExchange']
   }
 }
 
 // ---------- Role assignments ----------
 
-// Nodes pull images.
-resource kubeletAcrPull 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, aks.id, roles.acrPull)
-  scope: acr
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.acrPull)
-    principalId: aks.properties.identityProfile.kubeletidentity.objectId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// The app reads its secrets and writes backups (to the backups container only).
+// The VM reads its secrets, writes (and, for a restore, reads) backups, and downloads releases.
 resource appSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(vault.id, appIdentity.id, roles.keyVaultSecretsUser)
   scope: vault
@@ -299,22 +298,6 @@ resource appSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     principalType: 'ServicePrincipal'
   }
 }
-
-// The Tailscale operator reads its two secrets only (not the vault): they're set by hand first (docs/deploy.md).
-resource tailscaleSecrets 'Microsoft.KeyVault/vaults/secrets@2023-07-01' existing = [for name in tailscaleSecretNames: {
-  parent: vault
-  name: name
-}]
-
-resource tailscaleSecretsUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = [for (name, i) in tailscaleSecretNames: {
-  name: guid(tailscaleSecrets[i].id, tailscaleIdentity.id, roles.keyVaultSecretsUser)
-  scope: tailscaleSecrets[i]
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsUser)
-    principalId: tailscaleIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}]
 
 resource appBackups 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(backupContainer.id, appIdentity.id, roles.blobDataContributor)
@@ -326,9 +309,18 @@ resource appBackups 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// GitHub Actions reads this deployment's outputs, pushes images, and applies manifests. Cluster admin isn't much
-// beyond what pushing an image already allows here (the image runs with the app's secrets), and it's limited to
-// the protected "production" environment.
+resource appReleases 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(releaseContainer.id, appIdentity.id, roles.blobDataReader)
+  scope: releaseContainer
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataReader)
+    principalId: appIdentity.properties.principalId
+    principalType: 'ServicePrincipal'
+  }
+}
+
+// GitHub Actions reads this deployment's outputs, uploads a release and runs the install script on the VM. Running
+// scripts there is about what shipping code to it already allows, and only this bot's GitHub environment can do it.
 resource githubReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(resourceGroup().id, githubIdentity.id, roles.reader)
   properties: {
@@ -338,48 +330,28 @@ resource githubReader 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-resource githubAcrPush 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(acr.id, githubIdentity.id, roles.acrPush)
-  scope: acr
+resource githubReleases 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(releaseContainer.id, githubIdentity.id, roles.blobDataContributor)
+  scope: releaseContainer
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.acrPush)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataContributor)
     principalId: githubIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-resource githubClusterUser 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aks.id, githubIdentity.id, roles.aksClusterUser)
-  scope: aks
+resource githubVm 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(vm.id, githubIdentity.id, roles.vmContributor)
+  scope: vm
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.aksClusterUser)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.vmContributor)
     principalId: githubIdentity.properties.principalId
     principalType: 'ServicePrincipal'
   }
 }
 
-resource githubClusterAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aks.id, githubIdentity.id, roles.aksRbacClusterAdmin)
-  scope: aks
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.aksRbacClusterAdmin)
-    principalId: githubIdentity.properties.principalId
-    principalType: 'ServicePrincipal'
-  }
-}
-
-// The owner administers the cluster, sets secrets and can download backups. (Subscription Owner covers the
-// management plane, but not these data-plane permissions.)
-resource ownerClusterAdmin 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(aks.id, ownerObjectId, roles.aksRbacClusterAdmin)
-  scope: aks
-  properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.aksRbacClusterAdmin)
-    principalId: ownerObjectId
-    principalType: 'User'
-  }
-}
-
+// The owner sets secrets and moves databases in and out of backups. (Subscription Owner covers the management
+// plane, but not these data-plane permissions.)
 resource ownerSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   name: guid(vault.id, ownerObjectId, roles.keyVaultSecretsOfficer)
   scope: vault
@@ -391,10 +363,20 @@ resource ownerSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
 }
 
 resource ownerBackups 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
-  name: guid(backupContainer.id, ownerObjectId, roles.blobDataReader)
+  name: guid(backupContainer.id, ownerObjectId, roles.blobDataContributor)
   scope: backupContainer
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataReader)
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataContributor)
+    principalId: ownerObjectId
+    principalType: 'User'
+  }
+}
+
+resource ownerReleases 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(releaseContainer.id, ownerObjectId, roles.blobDataContributor)
+  scope: releaseContainer
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.blobDataContributor)
     principalId: ownerObjectId
     principalType: 'User'
   }
@@ -430,12 +412,10 @@ resource budget 'Microsoft.Consumption/budgets@2021-10-01' = {
   }
 }
 
-output aksName string = aks.name
-output acrName string = acr.name
-output acrLoginServer string = acr.properties.loginServer
+output vmName string = vm.name
 output keyVaultName string = vault.name
 output storageAccountName string = storage.name
 output backupContainerUrl string = '${storage.properties.primaryEndpoints.blob}${backupContainer.name}'
+output releaseContainerUrl string = '${storage.properties.primaryEndpoints.blob}${releaseContainer.name}'
 output appClientId string = appIdentity.properties.clientId
 output githubClientId string = githubIdentity.properties.clientId
-output tailscaleClientId string = tailscaleIdentity.properties.clientId

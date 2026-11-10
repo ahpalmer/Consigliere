@@ -2,7 +2,7 @@ name: ci
 
 on:
   push:
-    branches: [main, "feature/**"]
+    branches: [main, alison/main, "feature/**"]
   pull_request:
 
 permissions:
@@ -44,8 +44,8 @@ jobs:
           npm test
           npm run build
 
-      - name: Build (static linux binary with the dashboard embedded, as the container will run it)
-        run: CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags "-s -w" -o bin/consigliere ./cmd/consigliere
+      - name: Release (the Arm64 Linux binary with the dashboard embedded, packaged as the VMs install it)
+        run: bash deploy/package.sh dist/consigliere.tar.gz
 
   # The deployment files, checked on every push so a broken one shows up here rather than mid-deploy.
   deploy-files:
@@ -53,18 +53,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bicep (compile and lint)
-        run: az bicep build --file infra/main.bicep --stdout > /dev/null
-
-      - name: Kubernetes manifests (render with example values)
+      - name: Bicep (compile and lint, and both bots' parameters)
+        env:
+          CONSIGLIERE_OWNER_OBJECT_ID: 00000000-0000-0000-0000-000000000000
+          CONSIGLIERE_BUDGET_EMAIL: ci@example.com
         run: |
-          cp deploy/k8s/azure.env.example deploy/k8s/azure.env
-          kubectl kustomize deploy/k8s > /dev/null
-          cp deploy/k8s/tailscale/azure.env.example deploy/k8s/tailscale/azure.env
-          kubectl kustomize deploy/k8s/tailscale > /dev/null
+          az bicep build --file infra/main.bicep --stdout > /dev/null
+          for p in infra/*.bicepparam; do az bicep build-params --file "$p" --stdout > /dev/null; done
 
       - name: Shell scripts
-        run: shellcheck deploy/*.sh deploy/k8s/datapack-sync.sh
+        run: shellcheck -x deploy/*.sh deploy/vm/*.sh
+
+      - name: systemd units
+        run: |
+          # verify wants the binaries the units start; empty stand-ins are enough to check the unit files themselves.
+          sudo mkdir -p /opt/consigliere/current/deploy/vm
+          sudo touch /opt/consigliere/current/consigliere /opt/consigliere/current/deploy/vm/datapack-sync.sh
+          sudo chmod +x /opt/consigliere/current/consigliere /opt/consigliere/current/deploy/vm/datapack-sync.sh
+          sudo useradd --system consigliere
+          systemd-analyze verify deploy/vm/*.service deploy/vm/*.timer
 
       - name: Container image
         run: docker build -t consigliere:ci .

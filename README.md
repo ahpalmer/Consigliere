@@ -7,8 +7,8 @@ that should be predictable.
 ```mermaid
 flowchart LR
     phone([Telegram on phone]) <-- long-poll, outbound only --> host
-    browser([Browser via port-forward or tailnet]) -. dashboard, signed in .-> host
-    subgraph AKS["AKS (single replica, no public ingress)"]
+    browser([Browser on the tailnet]) -. dashboard, signed in .-> host
+    subgraph VM["Azure VM (one per bot, no inbound ports)"]
         host[cmd/consigliere<br/>receiver + scheduler + dashboard]
         host --> router[router<br/>slash commands]
         router --> chat[llm.Chat<br/>Claude]
@@ -30,9 +30,10 @@ flowchart LR
   produces goes to a review queue first, and a human makes every outward-facing move.
 - **Kill switch.** `/pause` stops scheduled work and LLM calls immediately.
 - **Minimal attack surface.** Telegram uses long-polling (outbound only), and only allowlisted chat IDs are answered.
-  The one listener is the dashboard: loopback by default, reachable in the cluster only through `kubectl port-forward` or
-  the owner's own tailnet (no public ingress), and behind a sign-in token. Secrets live in a file outside the repo locally and in Key Vault in Azure.
-- **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to a tiny container), the official
+  The one listener is the dashboard: loopback only, published to the owner's own tailnet by Tailscale (no inbound
+  ports), and behind a sign-in token. Secrets live in a file outside the repo locally, and in Key Vault in Azure, read
+  straight into memory.
+- **Boring dependencies.** Pure-Go SQLite (no cgo, so it cross-compiles to one static Arm64 binary), the official
   Anthropic and Google SDKs, a ~150-line Telegram Bot API client instead of a framework, and a dashboard that's just
   React, React Router and hand-written CSS.
 
@@ -40,7 +41,7 @@ flowchart LR
 
 | Path | Purpose |
 |---|---|
-| `cmd/consigliere` | Entry point and wiring: `run`, `auth gmail`, `secrets set/list` |
+| `cmd/consigliere` | Entry point and wiring: `run`, `auth gmail`, `secrets set/list`, `keyvault get` |
 | `internal/config` | Layered settings: `config/consigliere.json` → secrets file → `Section__Key` env vars |
 | `internal/llm` | Claude client: per-task models, structured output, chat with refusal fallback, usage, prompts |
 | `internal/store` | SQLite, embedded migrations, timestamp encoding |
@@ -52,9 +53,11 @@ flowchart LR
 | `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
 | `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
-| `internal/backup` | Nightly database copy to blob storage, signed in with the pod's workload identity |
-| `infra` | Bicep: AKS, container registry, Key Vault, backup storage, identities, role assignments, budget |
-| `deploy`, `Dockerfile` | The container image, Kustomize manifests for AKS (plus the optional Tailscale operator), and the deploy, secrets and restore scripts |
+| `internal/azure` | The VM's managed identity and Key Vault secrets, over plain HTTP |
+| `internal/backup` | Nightly database copy to blob storage, signed in as the VM's managed identity |
+| `infra` | Bicep, one resource group per bot: VM, network, Key Vault, storage (backups, releases), identities, role assignments, budget |
+| `deploy` | Release packaging, the deploy/secrets/restore scripts, and `deploy/vm`: the VM's install script, systemd units and data pack sync |
+| `Dockerfile` | A container image, for running the agent locally in Docker |
 | `samples/data-pack` | Fake data pack so a clean clone runs |
 
 ## Run locally
@@ -107,8 +110,9 @@ a morning briefing lists the day's to-dos, then the best new options; Sundays br
 
 ## Run in Azure
 
-The agent runs on a one-node AKS cluster, and `infra/`, `deploy/k8s/` and the `deploy` workflow describe all of it. A push
-to `main` that passes CI deploys itself, signing in to Azure over OIDC. See [docs/deploy.md](docs/deploy.md).
+Each bot runs on its own small Arm64 VM (~$12/month) in its own resource group, and `infra/`, `deploy/` and the `deploy`
+workflow describe all of it. A push to a bot's branch (`main`, `alison/main`) that passes CI deploys to that bot's VM,
+signing in to Azure over OIDC. The dashboard is on the tailnet through Tailscale. See [docs/deploy.md](docs/deploy.md).
 
 ## Develop
 
@@ -130,3 +134,4 @@ cd web && npm run typecheck && npm test   # dashboard
 - [x] M6: pipeline (options → active → waiting → completed), apply kit, morning briefing
 - [x] M7: application updates from email: received → waiting, interview → active, offers and rejections proposed ([docs/mail.md](docs/mail.md))
 - [x] M8: React + TypeScript dashboard ([docs/dashboard.md](docs/dashboard.md)), with suggested applications: prepared resume, answers and form link
+- [x] M12: from AKS to one small VM per bot: systemd, secrets from Key Vault into memory, Tailscale for the dashboard, per-branch deploys ([docs/deploy.md](docs/deploy.md))

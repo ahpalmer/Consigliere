@@ -4,6 +4,9 @@
 //	consigliere auth gmail           one-time consent for the dedicated mailbox
 //	consigliere secrets set KEY VAL  store a secret (e.g. Telegram:BotToken) outside the repo
 //	consigliere secrets list         show which secrets are set (values hidden)
+//	consigliere keyvault get VAULT NAME  print one Key Vault secret, signed in as the VM's identity (for scripts)
+//
+// On the VM, --secrets is keyvault://<vault>/<secret>: the secrets JSON is read from Key Vault into memory.
 package main
 
 import (
@@ -23,6 +26,7 @@ import (
 	_ "time/tzdata" // IANA zones work on Windows and in minimal containers
 
 	"github.com/ahpalmer/consigliere/internal/agent"
+	"github.com/ahpalmer/consigliere/internal/azure"
 	"github.com/ahpalmer/consigliere/internal/backup"
 	"github.com/ahpalmer/consigliere/internal/channel"
 	"github.com/ahpalmer/consigliere/internal/clock"
@@ -42,7 +46,7 @@ import (
 
 func main() {
 	configPath := flag.String("config", "config/consigliere.json", "settings file (no secrets)")
-	secretsPath := flag.String("secrets", config.DefaultSecretsPath(), "secrets file (flat \"Section:Key\" JSON), kept outside the repo")
+	secretsPath := flag.String("secrets", config.DefaultSecretsPath(), "secrets file (flat \"Section:Key\" JSON) kept outside the repo, or keyvault://<vault>/<secret>")
 	flag.Parse()
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -53,15 +57,22 @@ func main() {
 	case len(args) == 0 || args[0] == "run":
 		err = run(ctx, *configPath, *secretsPath)
 	case len(args) == 2 && args[0] == "auth" && args[1] == "gmail":
-		err = authGmail(ctx, *configPath, *secretsPath)
+		if err = writableSecrets(*secretsPath); err == nil {
+			err = authGmail(ctx, *configPath, *secretsPath)
+		}
 	case len(args) == 4 && args[0] == "secrets" && args[1] == "set":
-		if err = config.SetSecret(*secretsPath, args[2], args[3]); err == nil {
+		if err = writableSecrets(*secretsPath); err == nil {
+			err = config.SetSecret(*secretsPath, args[2], args[3])
+		}
+		if err == nil {
 			fmt.Printf("Saved %s to %s\n", args[2], *secretsPath)
 		}
 	case len(args) == 2 && args[0] == "secrets" && args[1] == "list":
-		err = listSecrets(*secretsPath)
+		err = listSecrets(ctx, *secretsPath)
+	case len(args) == 4 && args[0] == "keyvault" && args[1] == "get":
+		err = printVaultSecret(ctx, args[2], args[3])
 	default:
-		err = errors.New("usage: consigliere [run | auth gmail | secrets set KEY VALUE | secrets list]")
+		err = errors.New("usage: consigliere [run | auth gmail | secrets set KEY VALUE | secrets list | keyvault get VAULT NAME]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
@@ -70,7 +81,11 @@ func main() {
 }
 
 func run(ctx context.Context, configPath, secretsPath string) error {
-	cfg, err := config.Load(configPath, secretsPath, os.Environ())
+	secrets, err := readSecrets(ctx, secretsPath)
+	if err != nil {
+		return err
+	}
+	cfg, err := config.LoadWithSecrets(configPath, secrets, os.Environ())
 	if err != nil {
 		return err
 	}
@@ -171,13 +186,10 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	sched.Jobs = append(sched.Jobs,
 		&radar.TuningSummary{DB: db, Channel: sender, Clock: clk, Cron: cfg.Radar.TuningCron},
 		&pipeline.MonthlySummary{Pipeline: pipe, Channel: sender, Cron: cfg.Pipeline.SummaryCron})
-	// Backups run where there's somewhere to put them: in AKS, signed in as the pod's workload identity.
+	// Backups run where there's somewhere to put them: on the VM, signed in as its managed identity.
 	if cfg.Backup.ContainerUrl != "" {
-		identity, err := backup.WorkloadIdentityFromEnv()
-		if err != nil {
-			return err
-		}
-		sched.Jobs = append(sched.Jobs, &backup.Job{DB: db, Blobs: &backup.BlobContainer{URL: cfg.Backup.ContainerUrl, Tokens: identity},
+		sched.Jobs = append(sched.Jobs, &backup.Job{DB: db,
+			Blobs: &backup.BlobContainer{URL: cfg.Backup.ContainerUrl, Tokens: azure.ManagedIdentityFromEnv()},
 			Clock: clk, Cron: cfg.Backup.Cron})
 	}
 
@@ -275,8 +287,47 @@ func authGmail(ctx context.Context, configPath, secretsPath string) error {
 	return nil
 }
 
-func listSecrets(path string) error {
-	flat, err := config.ReadSecrets(path)
+// readSecrets reads the secrets file, or on the VM the same JSON from Key Vault (keyvault://<vault>/<secret>).
+func readSecrets(ctx context.Context, path string) (map[string]string, error) {
+	vault, name, ok := azure.ParseSecretRef(path)
+	if !ok {
+		if path == "" {
+			return map[string]string{}, nil
+		}
+		return config.ReadSecrets(path)
+	}
+	raw, err := (&azure.KeyVault{Name: vault, Tokens: azure.ManagedIdentityFromEnv()}).Secret(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	flat, err := config.ParseSecrets([]byte(raw))
+	if err != nil {
+		return nil, fmt.Errorf("parse secrets %s: %w", path, err)
+	}
+	return flat, nil
+}
+
+// writableSecrets refuses Key Vault for commands that save a secret: the vault is changed with deploy/push-secrets.sh.
+func writableSecrets(path string) error {
+	if _, _, ok := azure.ParseSecretRef(path); ok {
+		return errors.New("secrets in Key Vault are changed with deploy/push-secrets.sh, not from here")
+	}
+	return nil
+}
+
+// printVaultSecret writes a secret's value to stdout exactly (no newline added), so a script can pipe it into a file
+// in memory, e.g. the data pack's deploy key.
+func printVaultSecret(ctx context.Context, vault, name string) error {
+	value, err := (&azure.KeyVault{Name: vault, Tokens: azure.ManagedIdentityFromEnv()}).Secret(ctx, name)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Print(value)
+	return err
+}
+
+func listSecrets(ctx context.Context, path string) error {
+	flat, err := readSecrets(ctx, path)
 	if err != nil {
 		return err
 	}

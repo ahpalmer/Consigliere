@@ -1,55 +1,27 @@
 #!/usr/bin/env bash
-# Replaces the cluster's database with a local file: the laptop's database on first move to AKS, or a downloaded
-# backup. Stops the agent, swaps the file (keeping the old one as consigliere.db.before-restore), and starts it again.
+# Replaces a bot's database with a backup: a blob already in its backups container, or a local file (uploaded there
+# first, e.g. a laptop's database). The VM stops the agent, swaps the file (keeping the old one as
+# consigliere.db.before-restore) and starts it again.
 #
-#   deploy/restore-db.sh <file.db>
+#   deploy/restore-db.sh <backup blob name | file.db>
+#
+# CONSIGLIERE_RESOURCE_GROUP picks the bot (default rg-consigliere). Needs: az signed in, bash.
 set -euo pipefail
 
-file=${1:?usage: deploy/restore-db.sh <file.db>}
-[[ -f $file ]] || { echo "no such file: $file" >&2; exit 1; }
-# kubectl cp reads "C:/..." as a pod named C, so copy by bare name from the file's folder.
-cd "$(dirname "$file")"
-file=$(basename "$file")
-k() { kubectl -n consigliere "$@"; }
+source=${1:?usage: deploy/restore-db.sh <backup blob name | file.db>}
+[[ -f $source ]] && source=$(realpath "$source")
+cd "$(dirname "$0")/.."
+# shellcheck source=deploy/lib.sh
+. deploy/lib.sh
+bot_outputs
 
-k scale deployment/consigliere --replicas=0
-while [[ -n $(k get pods -l app.kubernetes.io/name=consigliere -o name) ]]; do sleep 2; done
+blob=$source
+if [[ -f $source ]]; then
+  blob=restore-$(date -u +%Y-%m-%dT%H%MZ).db # outside the backups/consigliere- prefix, so retention leaves it alone
+  echo "Uploading $source as $blob"
+  az storage blob upload --auth-mode login --account-name "$storage" -c backups -n "$blob" \
+    -f "$(native "$source")" --only-show-errors -o none
+fi
 
-# A throwaway pod on the same disk (the disk attaches to one node at a time, so the agent has to be stopped).
-k apply -f - <<'EOF'
-apiVersion: v1
-kind: Pod
-metadata:
-  name: consigliere-restore
-spec:
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 65532
-    runAsGroup: 65532
-    fsGroup: 65532
-    seccompProfile: { type: RuntimeDefault }
-  containers:
-    - name: restore
-      image: busybox:1.37.0
-      command: [sleep, "3600"]
-      securityContext:
-        allowPrivilegeEscalation: false
-        capabilities: { drop: [ALL] }
-      volumeMounts:
-        - { name: data, mountPath: /data }
-  volumes:
-    - name: data
-      persistentVolumeClaim: { claimName: consigliere-data }
-EOF
-trap 'k delete pod consigliere-restore --wait=false >/dev/null; k scale deployment/consigliere --replicas=1' EXIT
-k wait --for=condition=Ready pod/consigliere-restore --timeout=3m
-
-k cp "$file" consigliere-restore:/data/pack/db/consigliere.db.new
-k exec consigliere-restore -- sh -c '
-  set -e
-  cd /data/pack/db
-  if [ -f consigliere.db ]; then mv consigliere.db consigliere.db.before-restore; fi
-  rm -f consigliere.db-wal consigliere.db-shm
-  mv consigliere.db.new consigliere.db
-  ls -l'
-echo "Restored $file; starting the agent."
+run_on_vm deploy/vm/restore.sh CONSIGLIERE_RESTORE_OK \
+  "BACKUP_CONTAINER_URL=$backups" "AZURE_CLIENT_ID=$client_id" "RESTORE_BLOB=$blob"

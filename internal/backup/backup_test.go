@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ahpalmer/consigliere/internal/azure"
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/store"
 )
@@ -70,22 +71,17 @@ func TestJobUploadsAWorkingCopyOfTheDatabase(t *testing.T) {
 	}
 }
 
-func TestBlobContainerSignsInWithTheWorkloadIdentity(t *testing.T) {
-	tokenFile := filepath.Join(t.TempDir(), "token")
-	if err := os.WriteFile(tokenFile, []byte("k8s-token\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestBlobContainerSignsInWithTheVMIdentity(t *testing.T) {
 	var got *http.Request
 	var gotBody []byte
-	azure := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
-		case "/tenant-1/oauth2/v2.0/token":
-			r.ParseForm()
-			if r.Form.Get("client_assertion") != "k8s-token" || r.Form.Get("client_id") != "client-1" || r.Form.Get("scope") != storageScope {
-				http.Error(w, `{"error":"invalid_client"}`, http.StatusUnauthorized)
+		case "/metadata/identity/oauth2/token":
+			if r.URL.Query().Get("resource") != "https://storage.azure.com" || r.URL.Query().Get("client_id") != "client-1" {
+				http.Error(w, `{"error":"invalid_request"}`, http.StatusBadRequest)
 				return
 			}
-			w.Write([]byte(`{"access_token":"entra-token"}`))
+			w.Write([]byte(`{"access_token":"vm-token"}`))
 		case "/backups/consigliere.db":
 			got = r
 			gotBody, _ = io.ReadAll(r.Body)
@@ -94,23 +90,14 @@ func TestBlobContainerSignsInWithTheWorkloadIdentity(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	}))
-	defer azure.Close()
+	defer server.Close()
 
-	blobs := &BlobContainer{URL: azure.URL + "/backups/",
-		Tokens: &WorkloadIdentity{TenantID: "tenant-1", ClientID: "client-1", TokenFile: tokenFile, AuthorityHost: azure.URL + "/"}}
+	blobs := &BlobContainer{URL: server.URL + "/backups/",
+		Tokens: &azure.ManagedIdentity{ClientID: "client-1", Endpoint: server.URL + "/metadata/identity/oauth2/token"}}
 	if err := blobs.Put(context.Background(), "consigliere.db", bytes.NewReader([]byte("db")), 2); err != nil {
 		t.Fatal(err)
 	}
-	if got.Header.Get("Authorization") != "Bearer entra-token" || got.Header.Get("x-ms-blob-type") != "BlockBlob" || string(gotBody) != "db" {
+	if got.Header.Get("Authorization") != "Bearer vm-token" || got.Header.Get("x-ms-blob-type") != "BlockBlob" || string(gotBody) != "db" {
 		t.Fatalf("upload: headers=%v body=%q", got.Header, gotBody)
-	}
-}
-
-func TestWorkloadIdentityFromEnvNeedsTheWebhookVariables(t *testing.T) {
-	t.Setenv("AZURE_TENANT_ID", "")
-	t.Setenv("AZURE_CLIENT_ID", "")
-	t.Setenv("AZURE_FEDERATED_TOKEN_FILE", "")
-	if _, err := WorkloadIdentityFromEnv(); err == nil {
-		t.Fatal("want an error without the workload identity variables")
 	}
 }
