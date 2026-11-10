@@ -62,7 +62,7 @@ log "installing $release"
 mkdir -p "$app/releases"
 rm -rf "$dir.new" && mkdir "$dir.new"
 curl -fsS -H "Authorization: Bearer $(storage_token)" -H "x-ms-version: 2023-11-03" "$RELEASE_URL" | tar -xz -C "$dir.new"
-chown -R root:root "$dir.new" && chmod -R go-w "$dir.new"
+chown -R root:root "$dir.new" && chmod -R go-w,a+rX "$dir.new" # root's, readable by the service user
 chmod 755 "$dir.new/consigliere" "$dir.new/deploy/vm/datapack-sync.sh"
 rm -rf "$dir" && mv "$dir.new" "$dir"
 

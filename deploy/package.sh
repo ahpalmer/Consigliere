@@ -11,6 +11,7 @@ cd "$(dirname "$0")/.."
 
 stage=$(mktemp -d)
 trap 'rm -rf "$stage"' EXIT
+chmod 755 "$stage" # it's the tarball's top directory: mktemp's 0700 would lock the service user out of the release
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags "-s -w" -o "$stage/consigliere" ./cmd/consigliere
 mkdir -p "$stage/config" "$stage/deploy/vm" "$(dirname "$out")"
 cp config/consigliere.json "$stage/config/"

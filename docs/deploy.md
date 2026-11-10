@@ -134,7 +134,9 @@ before the `deploy/` scripts.
 
 7. **GitHub.** In the repository's Settings:
    - **Environments** → New environment (`production` for `main`, `alison` for `alison/main`). Under *Deployment
-     branches*, choose *Selected branches* and add the bot's branch.
+     branches*, choose *Selected branches* and add `main` plus the bot's branch. The `deploy` workflow always runs
+     from `main` (that's how GitHub runs a workflow triggered by another one) and picks the environment from the
+     branch CI passed on, so `main` must be allowed even for Alison's; the bot's branch covers manual runs.
    - In that environment, under **Environment secrets**, add `AZURE_CLIENT_ID` (the `githubClientId` output),
      `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, and `DATA_PACK_REPO` (the bot's data pack SSH clone URL,
      `git@github.com:<you>/<repo>.git`). They're identifiers that grant nothing on their own, but as secrets they're
