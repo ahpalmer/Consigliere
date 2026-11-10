@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/ahpalmer/consigliere/internal/llm"
 )
@@ -18,8 +19,8 @@ var coverPrompt string
 // WinsPath holds the owner's accomplishments in their own words, beyond what fits on the resume.
 const WinsPath = "profile/wins.md"
 
-// The instructions box is for a few paragraphs, not a document.
-const maxInstructionsChars = 4000
+// The instructions box is for a few pages at most; the cap only catches a whole document pasted by mistake.
+const maxInstructionsChars = 20000
 
 // CoverLetter is a letter for one posting, written from the owner's background and their instructions for it.
 type CoverLetter struct {
@@ -38,8 +39,8 @@ type coverDraft struct {
 // CoverLetter writes the letter body with the model; the header, greeting and sign-off are fixed.
 func (k *Kit) CoverLetter(ctx context.Context, job Job, instructions string, date time.Time) (*CoverLetter, error) {
 	instructions = strings.TrimSpace(instructions)
-	if len(instructions) > maxInstructionsChars {
-		return nil, fmt.Errorf("instructions are too long (%d characters; keep them under %d)", len(instructions), maxInstructionsChars)
+	if n := utf8.RuneCountInString(instructions); n > maxInstructionsChars {
+		return nil, fmt.Errorf("instructions are too long (%d characters; keep them under %d)", n, maxInstructionsChars)
 	}
 
 	var background strings.Builder
