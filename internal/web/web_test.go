@@ -227,7 +227,7 @@ func TestPursuitLifecycleOverTheAPI(t *testing.T) {
 		t.Fatalf("activate = %d %+v", code, activated)
 	}
 	p := activated.Pursuit
-	if p.Stage != "active" || p.NextStep != "Tailor resume" || len(p.Steps) != 4 {
+	if p.Stage != "active" || p.NextStep != "Write cover letter" || len(p.Steps) != 4 {
 		t.Fatalf("new pursuit = %+v", p)
 	}
 	// Activating again finds the same pursuit.

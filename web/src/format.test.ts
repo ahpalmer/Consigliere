@@ -31,7 +31,7 @@ describe("labels", () => {
     expect(completion("offer", "offer")).toBe("Offer");
   });
   it("describes events", () => {
-    expect(eventText("step", "resume")).toBe("Done: Tailor resume");
+    expect(eventText("step", "resume")).toBe("Done: Write cover letter");
     expect(eventText("completed", "rejected went with someone internal")).toBe(
       "Completed: Rejected · went with someone internal",
     );

@@ -97,7 +97,7 @@ cheap model (structured JSON output, cached by content + profile), and alerts in
 into SQLite at `db/consigliere.db` inside the data pack.
 
 The pipeline is a short list, not a firehose: 🎯 on an alert (or `/activate`) makes an item *active*, with a checklist
-(tailor resume → find people → outreach → submit → follow up → prep → interview → thank-you). 📨 moves it to
+(write cover letter → find people → outreach → submit → follow up → prep → interview → thank-you). 📨 moves it to
 *waiting* with follow-up nudges at 7 and 14 days and a "ghosted?" check at 30; `/interview` brings it back to active;
 `/complete` files it with an outcome. `/kit` builds the apply kit: people you know there (from your own LinkedIn
 export, read locally), people-search links you open yourself, veteran networks, a one-page DOCX that only selects

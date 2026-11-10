@@ -234,7 +234,7 @@ func TestCommandsAndButtons(t *testing.T) {
 		t.Fatal(reply)
 	}
 	card := f.channel.last(t)
-	if !strings.Contains(card.text, "🎯 P1 · Platform Engineer · Acme") || !strings.Contains(card.text, "⬜ Tailor resume  ← next") {
+	if !strings.Contains(card.text, "🎯 P1 · Platform Engineer · Acme") || !strings.Contains(card.text, "⬜ Write cover letter  ← next") {
 		t.Fatal(card.text)
 	}
 	labels := func(bs []channel.Button) string {
@@ -244,17 +244,17 @@ func TestCommandsAndButtons(t *testing.T) {
 		}
 		return strings.Join(out, "|")
 	}
-	if got := labels(card.buttons); got != "✅ Tailor resume|✍️ Kit|📨 Applied|🗂 Complete" {
+	if got := labels(card.buttons); got != "✅ Write cover letter|✍️ Kit|📨 Applied|🗂 Complete" {
 		t.Fatal(got)
 	}
 
 	// Ticking via the button updates the card in place.
 	toast, err := f.cmd.HandleCallback(f.ctx, card.buttons[0].Data)
-	if err != nil || toast != "✅ Tailor resume" {
+	if err != nil || toast != "✅ Write cover letter" {
 		t.Fatal(toast, err)
 	}
 	text, buttons, ok, err := f.cmd.Refresh(f.ctx, card.buttons[0].Data)
-	if err != nil || !ok || !strings.Contains(text, "✅ Tailor resume") || buttons[0].Label != "✅ Find people" {
+	if err != nil || !ok || !strings.Contains(text, "✅ Write cover letter") || buttons[0].Label != "✅ Find people" {
 		t.Fatal(text, err)
 	}
 
@@ -321,7 +321,7 @@ func TestCommandsAndButtons(t *testing.T) {
 	active, _ := f.pl.List(f.ctx, StageActive)
 	waiting, _ := f.pl.List(f.ctx, StageWaiting)
 	agenda := f.pl.Agenda(active, waiting)
-	if !strings.Contains(agenda, "🎤 Fri Oct 30, 2:00 PM: P1") || !strings.Contains(agenda, "prep not done") || !strings.Contains(agenda, "🎯 P3 · Acme: Tailor resume") {
+	if !strings.Contains(agenda, "🎤 Fri Oct 30, 2:00 PM: P1") || !strings.Contains(agenda, "prep not done") || !strings.Contains(agenda, "🎯 P3 · Acme: Write cover letter") {
 		t.Fatal(agenda)
 	}
 }

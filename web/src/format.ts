@@ -79,7 +79,7 @@ const eventLabels: Record<string, string> = {
 };
 
 const stepLabels: Record<string, string> = {
-  resume: "Tailor resume",
+  resume: "Write cover letter",
   people: "Find people",
   outreach: "Send outreach",
   submit: "Submit application",

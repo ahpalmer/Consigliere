@@ -32,7 +32,7 @@ var Outcomes = []string{"offer", "rejected", "ghosted", "withdrawn", "dropped"}
 type Step struct{ Key, Label string }
 
 var Steps = []Step{
-	{"resume", "Tailor resume"},
+	{"resume", "Write cover letter"}, // key kept from "Tailor resume": stored steps use it
 	{"people", "Find people"},
 	{"outreach", "Send outreach"},
 	{"submit", "Submit application"},
