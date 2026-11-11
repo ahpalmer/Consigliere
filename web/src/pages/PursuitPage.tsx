@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { api, type Draft, type DraftKind, type Pursuit, type PursuitDetail } from "../api";
+import { api, type Draft, type DraftKind, type People, type Person, type Pursuit, type PursuitDetail, type SearchLink } from "../api";
 import { Badge, ErrorNote, External, Fit, Panel, StageBadge } from "../components";
 import { completion, dateTime, eventText, nextWorkdayMorning, outcomeLabels, relativeDay, shortDate, toLocalInput } from "../format";
 import { useAction, useLoad } from "../hooks";
@@ -73,6 +73,8 @@ export function PursuitPage() {
       <div className="detail-grid">
         <div className="stack">
           {p.stage !== "completed" && <Checklist p={p} onChange={reload} />}
+          {detail.data.people && <PeopleYouKnow company={p.company} people={detail.data.people} />}
+          <Research links={detail.data.research} />
           <Actions detail={detail.data} onChange={reload} />
           <Notes p={p} onChange={reload} />
         </div>
@@ -109,6 +111,94 @@ function Checklist({ p, onChange }: { p: Pursuit; onChange: () => Promise<void> 
       </ul>
       <ErrorNote message={error} />
     </Panel>
+  );
+}
+
+const peopleShown = 8;
+
+function PeopleYouKnow({ company, people }: { company: string; people: People }) {
+  const [all, setAll] = useState(false);
+  const known = all ? people.known : people.known.slice(0, peopleShown);
+  return (
+    <Panel title={people.known.length ? `People you know at ${company} (${people.known.length})` : `People you know at ${company}`}>
+      {!people.haveExport ? (
+        <p className="muted">
+          Add your LinkedIn connections export to the data pack as profile/connections.csv (LinkedIn → Settings → Data privacy → Get a copy of
+          your data → Connections).
+        </p>
+      ) : people.known.length === 0 ? (
+        <p className="muted">None in your LinkedIn connections.</p>
+      ) : (
+        <ul className="people">
+          {known.map((c, i) => (
+            <PersonRow key={i} c={c} />
+          ))}
+        </ul>
+      )}
+      {people.known.length > peopleShown && (
+        <button className="btn ghost small" onClick={() => setAll(!all)}>
+          {all ? "Show fewer" : `Show all ${people.known.length}`}
+        </button>
+      )}
+      {people.similar.length > 0 && (
+        <>
+          <p className="muted small">At similarly named companies (check it's the same one):</p>
+          <ul className="people">
+            {people.similar.map((c, i) => (
+              <PersonRow key={i} c={c} withCompany />
+            ))}
+          </ul>
+        </>
+      )}
+      {people.groups.length > 0 && <p className="small">Veteran groups: {people.groups.join(" · ")}</p>}
+      {people.searches.length > 0 && (
+        <p className="small row wrap">
+          <span className="muted">Find more:</span>
+          {people.searches.map((l) => (
+            <External key={l.url} href={l.url}>
+              {l.label} ↗
+            </External>
+          ))}
+        </p>
+      )}
+      {people.problems.map((m) => (
+        <ErrorNote key={m} message={m} />
+      ))}
+    </Panel>
+  );
+}
+
+/** Glassdoor and the like: pages the owner opens themselves. The bot never reads them. */
+export function Research({ links }: { links: SearchLink[] }) {
+  if (links.length === 0) return null;
+  return (
+    <Panel title="Company research">
+      <ul className="bullets">
+        {links.map((l) => (
+          <li key={l.url}>
+            <External href={l.url}>{l.label} ↗</External>
+          </li>
+        ))}
+      </ul>
+      <p className="muted small">Opens in your browser. Worth reading before an interview or when weighing an offer.</p>
+    </Panel>
+  );
+}
+
+function PersonRow({ c, withCompany }: { c: Person; withCompany?: boolean }) {
+  return (
+    <li>
+      <span>
+        {c.url ? <External href={c.url}>{c.name}</External> : c.name}
+        {(c.position || withCompany) && (
+          <span className="muted">
+            {" "}
+            · {[c.position, withCompany ? c.company : ""].filter(Boolean).join(" at ")}
+          </span>
+        )}
+      </span>
+      {c.connectedOn && <span className="muted small">since {c.connectedOn}</span>}
+    </li>
   );
 }
 

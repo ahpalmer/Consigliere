@@ -78,11 +78,37 @@ export interface PursuitEvent {
   detail: string;
 }
 
+export interface Person {
+  name: string;
+  position: string;
+  company: string;
+  connectedOn: string;
+  url: string;
+}
+
+/** A page for the owner to open in their own browser; the bot never fetches it. */
+export interface SearchLink {
+  label: string;
+  url: string;
+}
+
+/** Who the owner knows at the company, from their LinkedIn export in the data pack. */
+export interface People {
+  haveExport: boolean;
+  known: Person[];
+  similar: Person[];
+  groups: string[];
+  searches: SearchLink[];
+  problems: string[];
+}
+
 export interface PursuitDetail {
   pursuit: Pursuit;
   events: PursuitEvent[];
   drafts: Draft[];
   outcomes: string[];
+  people: People | null;
+  research: SearchLink[];
 }
 
 export interface Option {
@@ -231,7 +257,7 @@ export const api = {
     if (q.minScore !== undefined) params.set("minScore", String(q.minScore));
     return get<OptionsPage>(`/api/options?${params}`);
   },
-  item: (id: number) => get<{ item: Option; description: string; drafts: Draft[] }>(`/api/items/${id}`),
+  item: (id: number) => get<{ item: Option; description: string; drafts: Draft[]; research: SearchLink[] }>(`/api/items/${id}`),
   feedback: (id: number, value: 1 | -1) => send<{ feedback: number }>("PUT", `/api/items/${id}/feedback`, { value }),
   coverLetter: (itemId: number, instructions: string) => send<Draft>("POST", `/api/items/${itemId}/cover`, { instructions }),
 

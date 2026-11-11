@@ -13,6 +13,8 @@ var (
 	anchor      = regexp.MustCompile(`(?is)<a\b[^>]*?href\s*=\s*["']([^"']+)["'][^>]*>(.*?)</a\s*>`)
 	urlPattern  = regexp.MustCompile(`(?i)https?://[^\s\[\]<>"']+`)
 	linkedInJob = regexp.MustCompile(`(?i)linkedin\.com/(?:comm/)?jobs/view/(\d+)`)
+	// Glassdoor job links carry the listing id as jl= (job pages) or jobListingId= (alert email links).
+	glassdoorJob = regexp.MustCompile(`(?i)^https?://(?:[a-z0-9-]+\.)*glassdoor\.[a-z.]+/[^#]*?[?&](?:jl|jobListingId)=(\d+)`)
 )
 
 // ToText converts an HTML email to plain text that keeps each link as "text [url]", so the extractor can cite real
@@ -52,6 +54,15 @@ func Canonicalize(u string) string {
 
 func LinkedInJobID(u string) string {
 	if m := linkedInJob.FindStringSubmatch(u); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// GlassdoorJobID is the listing id in a Glassdoor job link. The rest of the link (tracking, position in the alert)
+// changes from one alert email to the next, so the id is what makes the same job dedupe.
+func GlassdoorJobID(u string) string {
+	if m := glassdoorJob.FindStringSubmatch(strings.TrimSpace(u)); m != nil {
 		return m[1]
 	}
 	return ""

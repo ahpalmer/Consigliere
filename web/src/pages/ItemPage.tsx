@@ -5,7 +5,7 @@ import { ErrorNote, External, Fit, Panel } from "../components";
 import { relativeDay, shortDate } from "../format";
 import { useAction, useLoad } from "../hooks";
 import { ItemActions } from "./Options";
-import { coverHint, coverPlaceholder, DraftRow } from "./PursuitPage";
+import { coverHint, coverPlaceholder, DraftRow, Research } from "./PursuitPage";
 
 export function ItemPage() {
   const id = Number(useParams().id);
@@ -81,6 +81,7 @@ export function ItemPage() {
             )}
           </Panel>
           <CoverLetter itemId={o.id} drafts={item.data.drafts.filter((d) => d.kind === "cover")} onChange={item.reload} />
+          <Research links={item.data.research} />
         </div>
         <div className="stack">
           <Panel title="Posting">

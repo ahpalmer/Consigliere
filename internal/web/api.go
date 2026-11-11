@@ -430,7 +430,69 @@ func (s *Server) getPursuit(w http.ResponseWriter, r *http.Request) {
 		d.Text = "" // the list shows titles; GET /api/drafts/{id} has the text
 		dr = append(dr, toDraftJSON(d))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"pursuit": s.pursuitJSON(p), "events": ev, "drafts": dr, "outcomes": pipeline.Outcomes})
+	writeJSON(w, http.StatusOK, map[string]any{"pursuit": s.pursuitJSON(p), "events": ev, "drafts": dr, "outcomes": pipeline.Outcomes,
+		"people": s.people(p.Company), "research": research(p.Company)})
+}
+
+// research is pages about the company for the owner to open (Glassdoor). Links only; nothing is fetched.
+func research(company string) []searchLinkJSON {
+	out := []searchLinkJSON{}
+	for _, l := range kit.ResearchLinks(company) {
+		out = append(out, searchLinkJSON{l.Label, l.URL})
+	}
+	return out
+}
+
+type personJSON struct {
+	Name        string `json:"name"`
+	Position    string `json:"position"`
+	Company     string `json:"company"`
+	ConnectedOn string `json:"connectedOn"`
+	URL         string `json:"url"`
+}
+
+type searchLinkJSON struct {
+	Label string `json:"label"`
+	URL   string `json:"url"`
+}
+
+type peopleJSON struct {
+	HaveExport bool             `json:"haveExport"`
+	Known      []personJSON     `json:"known"`
+	Similar    []personJSON     `json:"similar"`
+	Groups     []string         `json:"groups"`
+	Searches   []searchLinkJSON `json:"searches"`
+	Problems   []string         `json:"problems"`
+}
+
+// people is who the owner knows at the company, from the LinkedIn export in the data pack. Nil when there's no kit
+// or the lookup failed: the rest of the page still loads.
+func (s *Server) people(company string) *peopleJSON {
+	if s.Drafts == nil || s.Drafts.Kit == nil {
+		return nil
+	}
+	who, err := s.Drafts.Kit.People(company)
+	if err != nil {
+		slog.Warn("looking up people at a company", "err", err)
+		return nil
+	}
+	persons := func(list []kit.Connection) []personJSON {
+		out := []personJSON{}
+		for _, c := range list {
+			url := c.URL
+			if !strings.HasPrefix(url, "https://www.linkedin.com/") {
+				url = "" // the dashboard links it; only LinkedIn profile links
+			}
+			out = append(out, personJSON{c.Name, c.Position, c.Company, c.ConnectedOn, url})
+		}
+		return out
+	}
+	out := &peopleJSON{HaveExport: who.HaveExport, Known: persons(who.Known), Similar: persons(who.Similar), Groups: nonNil(who.Groups),
+		Searches: []searchLinkJSON{}, Problems: nonNil(who.Problems)}
+	for _, l := range who.Searches {
+		out.Searches = append(out.Searches, searchLinkJSON{l.Label, l.URL})
+	}
+	return out
 }
 
 func (s *Server) interview(r *http.Request, id int64, raw json.RawMessage) (*pipeline.Pursuit, error) {
@@ -628,7 +690,8 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		d.Text = "" // GET /api/drafts/{id} has the text
 		dr = append(dr, toDraftJSON(d))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id]), "description": item.Description, "drafts": dr})
+	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id]), "description": item.Description, "drafts": dr,
+		"research": research(item.Company)})
 }
 
 // coverLetter starts a cover letter for an item; it joins the item's pursuit when there is one.

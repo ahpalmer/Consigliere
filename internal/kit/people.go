@@ -74,6 +74,43 @@ func ParseConnections(r io.Reader) ([]Connection, error) {
 	return out, nil
 }
 
+// People is who the owner can reach at a company: their LinkedIn connections there, connections at similarly named
+// companies, veteran groups, and searches to open in their own LinkedIn session.
+type People struct {
+	HaveExport      bool         // profile/connections.csv is in the data pack
+	Known, Similar  []Connection // Similar: for the owner to judge ("Amazon" ~ "Amazon Web Services")
+	Groups, General []string     // veteran groups at the company, and programs that apply anywhere
+	Searches        []SearchLink
+	Problems        []string // data pack files that couldn't be read
+}
+
+// People looks the company up in the data pack. It's plain lookup, no model, so it's cheap enough for every page view.
+func (k *Kit) People(company string) (People, error) {
+	out := People{Searches: PeopleSearchLinks(company)}
+	text, ok, err := k.Pack.ReadText(ConnectionsPath)
+	if err != nil {
+		return out, err
+	}
+	if ok {
+		out.HaveExport = true
+		all, err := ParseConnections(strings.NewReader(text))
+		if err != nil {
+			out.Problems = append(out.Problems, fmt.Sprintf("Couldn't read %s: %v", ConnectionsPath, err))
+		}
+		out.Known, out.Similar = AtCompany(all, company), SimilarCompany(all, company)
+	}
+	if text, ok, err := k.Pack.ReadText(NetworksPath); err != nil {
+		return out, err
+	} else if ok {
+		networks, err := ParseNetworks(text)
+		if err != nil {
+			out.Problems = append(out.Problems, err.Error())
+		}
+		out.Groups, out.General = networks.For(company), networks.General
+	}
+	return out, nil
+}
+
 // AtCompany returns connections at exactly this company (after dropping punctuation and Inc/LLC).
 func AtCompany(all []Connection, company string) []Connection {
 	return matching(all, company, func(a, b string) bool { return a == b })

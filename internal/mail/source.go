@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"html"
 	"log/slog"
 	"regexp"
 	"slices"
@@ -35,6 +36,9 @@ type Source struct {
 	AllowedDomains []string
 	UpdateDomains  []string
 	BlockedSenders []string
+	// The owner's own addresses that forward job mail here (e.g. an Outlook rule). Their messages are judged and read
+	// as from the original sender in the forwarded header block, since forwarding makes the owner the sender.
+	ForwardedBy []string
 	// Companies the owner is pursuing; nil when there's no pipeline.
 	Companies func(ctx context.Context) ([]string, error)
 	// Updates handles application updates; nil ignores them.
@@ -98,7 +102,9 @@ func (s *Source) scan(ctx context.Context, query string, max int, backfill bool)
 
 	var messages []Message
 	for _, id := range ids {
-		if p, done := processed[id]; done && (p.note != noteNotAllowed || !s.allowed(p.from, companies)) {
+		// Skipped mail is looked at again once its sender is allowed, and so is a forward recorded under the owner's
+		// address (before ForwardedBy listed it).
+		if p, done := processed[id]; done && (p.note != noteNotAllowed || !s.allowed(p.from, companies) && !s.forwarder(p.from)) {
 			continue
 		}
 		msg, err := s.Mailbox.Get(ctx, id)
@@ -106,7 +112,7 @@ func (s *Source) scan(ctx context.Context, query string, max int, backfill bool)
 			return nil, nil, err
 		}
 		msg.ID = id
-		messages = append(messages, msg)
+		messages = append(messages, s.unwrapForward(msg))
 	}
 	// Oldest first, so a "received" then a "rejection" for the same job are applied in that order.
 	slices.SortStableFunc(messages, func(a, b Message) int { return receivedAt(a).Compare(receivedAt(b)) })
@@ -187,6 +193,61 @@ func FromCompany(from string, companies []string) bool {
 	return false
 }
 
+// unwrapForward gives a message the owner forwarded its original sender and subject, so the allowlist, the reader
+// and the record all see who really sent it. A forward with no recognizable header block keeps the owner as sender,
+// which no allowlist matches, so it's skipped.
+func (s *Source) unwrapForward(msg Message) Message {
+	if !s.forwarder(msg.From) {
+		return msg
+	}
+	from, ok := ForwardedSender(msg.Text)
+	if !ok {
+		// Not ToText: it decodes entities before stripping tags, so Outlook's "&lt;a@b&gt;" would vanish as a tag.
+		from, ok = ForwardedSender(html.UnescapeString(htmlTag.ReplaceAllString(htmlBreak.ReplaceAllString(msg.HTML, "\n"), " ")))
+	}
+	if ok {
+		msg.From = from
+		msg.Subject = forwardPrefix.ReplaceAllString(msg.Subject, "")
+	}
+	return msg
+}
+
+// forwarder: the From header is one of the owner's forwarding addresses.
+func (s *Source) forwarder(from string) bool {
+	sender := strings.ToLower(senderAddressOf(from))
+	return slices.ContainsFunc(s.ForwardedBy, func(a string) bool { return strings.ToLower(strings.TrimSpace(a)) == sender })
+}
+
+var (
+	htmlBreak     = regexp.MustCompile(`(?i)<br\s*/?>|</(p|div|tr|li|h\d)\s*>`)
+	htmlTag       = regexp.MustCompile(`<[^>]*>`)
+	forwardedFrom = regexp.MustCompile(`(?im)^[\s>*]*From:\**\s*(.+)$`)
+	emailAddress  = regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}`)
+	forwardPrefix = regexp.MustCompile(`(?i)^\s*((fwd?|fw)\s*:\s*)+`)
+)
+
+// ForwardedSender finds the original sender in a forwarded message: the first "From:" line with an address, as
+// Outlook ("From: Name <a@b>", sometimes with "<mailto:a@b>") and Gmail ("---------- Forwarded message ---------")
+// write it. A forwarding rule adds nothing above that block, so the first one is the original.
+func ForwardedSender(text string) (string, bool) {
+	for _, m := range forwardedFrom.FindAllStringSubmatch(text, -1) {
+		address := emailAddress.FindString(m[1])
+		if address == "" {
+			continue
+		}
+		name := m[1]
+		if i := strings.IndexAny(name, "<["); i >= 0 {
+			name = name[:i]
+		}
+		name = strings.Trim(strings.TrimSpace(name), `"'`)
+		if name == "" || strings.Contains(name, "@") {
+			return address, true
+		}
+		return name + " <" + address + ">", true
+	}
+	return "", false
+}
+
 func senderAddressOf(from string) string {
 	if m := senderAddress.FindStringSubmatch(from); m != nil {
 		return m[1]
@@ -213,9 +274,11 @@ func (s *Source) read(ctx context.Context, msg Message) ([]radar.FetchedItem, *U
 			continue
 		}
 		external := radar.Hash(u)
-		// LinkedIn ids are stable across alert emails, so the same job from two alerts dedupes.
+		// LinkedIn and Glassdoor ids are stable across alert emails, so the same job from two alerts dedupes.
 		if id := LinkedInJobID(u); id != "" {
 			external = "linkedin:" + id
+		} else if id := GlassdoorJobID(u); id != "" {
+			external = "glassdoor:" + id
 		}
 		var locations []string
 		if strings.TrimSpace(l.Location) != "" {

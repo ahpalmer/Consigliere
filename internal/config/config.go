@@ -112,9 +112,12 @@ type Mail struct {
 	RefreshToken       string
 	Query              string
 	MaxMessagesPerScan int
-	// Gmail leaves Spam and Trash out of searches; redirected mail often lands in Spam, so include it (the query
+	// Gmail leaves Spam and Trash out of searches; forwarded mail sometimes lands in Spam, so include it (the query
 	// excludes Trash). Senders are still checked before anything is read.
 	IncludeSpam bool
+	// The owner's addresses that forward job mail to the mailbox; their messages are read as from the original
+	// sender. Personal, so set it in the secrets file (Mail:ForwardedBy:0), not in the repo.
+	ForwardedBy []string
 	// Job sites whose alerts become items.
 	AllowedSenderDomains []string
 	// Application and scheduling systems, read for updates about the owner's applications.

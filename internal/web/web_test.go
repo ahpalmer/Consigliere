@@ -455,3 +455,38 @@ func TestCoverLetterForAnItemJoinsItsPursuit(t *testing.T) {
 }
 
 func itoa(n int64) string { return strconv.FormatInt(n, 10) }
+
+func TestPursuitShowsPeopleYouKnowThere(t *testing.T) {
+	f := newFixture(t, "")
+	var activated struct{ Pursuit pursuitJSON }
+	f.do("POST", "/api/pursuits", `{"company":"Initech, Inc.","title":"SRE"}`, &activated)
+
+	var detail struct{ People *peopleJSON }
+	f.do("GET", "/api/pursuits/"+itoa(activated.Pursuit.ID), "", &detail)
+	p := detail.People
+	if p == nil || !p.HaveExport || len(p.Known) != 1 || p.Known[0].Name != "Alex Example" || p.Known[0].Position != "Senior SRE" ||
+		p.Known[0].URL != "https://www.linkedin.com/in/alex-example" {
+		t.Fatalf("people = %+v", p)
+	}
+	if len(p.Groups) != 1 || len(p.Searches) != 2 || len(p.Similar) != 0 {
+		t.Fatalf("groups %v, searches %v, similar %v", p.Groups, p.Searches, p.Similar)
+	}
+	var withResearch struct{ Research []searchLinkJSON }
+	f.do("GET", "/api/pursuits/"+itoa(activated.Pursuit.ID), "", &withResearch)
+	if len(withResearch.Research) != 1 || !strings.Contains(withResearch.Research[0].URL, "glassdoor.com") ||
+		!strings.Contains(withResearch.Research[0].URL, "Initech") {
+		t.Fatalf("research = %+v", withResearch.Research)
+	}
+	var item struct{ Research []searchLinkJSON }
+	f.do("GET", "/api/items/2", "", &item)
+	if len(item.Research) != 1 || !strings.Contains(item.Research[0].URL, "Acme") {
+		t.Fatalf("item research = %+v", item.Research)
+	}
+
+	f.do("POST", "/api/pursuits", `{"company":"Nobody Corp","title":"SRE"}`, &activated)
+	detail.People = nil
+	f.do("GET", "/api/pursuits/"+itoa(activated.Pursuit.ID), "", &detail)
+	if p := detail.People; p == nil || p.Known == nil || len(p.Known) != 0 {
+		t.Fatalf("people at a company with none = %+v", p)
+	}
+}

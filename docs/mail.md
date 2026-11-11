@@ -12,7 +12,7 @@ real inbox ──(filters: job mail only, never security mail → forward/redire
 ## How it works
 
 - `mail.Source` is a Radar source (`ats: email`). Each scan lists recent messages (`Mail:Query`, Spam included with
-  `Mail:IncludeSpam`, since redirected mail often lands there), skips ones already in `ProcessedMessages`, and reads only
+  `Mail:IncludeSpam`, since forwarded mail sometimes lands there), skips ones already in `ProcessedMessages`, and reads only
   allowed senders, so nothing else reaches the LLM:
   - job sites (`Mail:AllowedSenderDomains`),
   - application and scheduling systems (`Mail:UpdateSenderDomains`: Greenhouse, Lever, Ashby, Workday, Calendly, ...),
@@ -27,7 +27,8 @@ real inbox ──(filters: job mail only, never security mail → forward/redire
   template changes; this works across senders. The model has no tools; its only output is that JSON.
 - **Guardrails:** a listing or link is kept only if its URL appears in the email itself. Email text is treated as
   untrusted data. Nothing is ever replied to, and nothing closes a pursuit without the owner's tap.
-- LinkedIn URLs collapse to `/jobs/view/{id}/`, so the same job from several alerts is one item.
+- LinkedIn URLs collapse to `/jobs/view/{id}/`, and Glassdoor links are keyed by their listing id (`jl=` or
+  `jobListingId=`), so the same job from several alerts is one item.
 - Email is an *aggregator* source: when the same company + title exists on a company board, the board item (with its
   full description) wins and the email copy is marked as a duplicate, whichever arrived first.
 
@@ -60,9 +61,15 @@ message says what it found. Old interview requests don't reopen anything.
    - and on every filter, exclusions for security mail: senders such as `accounts.google.com` and
      `accountprotection.microsoft.com`, and subjects with `password`, `reset`, `verify`, `sign in`, `code`.
 
-   Gmail: *Forward it to* keeps the original sender. Outlook: use **Redirect**, not Forward, or every message looks like
-   it came from the owner and is skipped. In the dedicated Gmail, a `deliveredto:<its address>` filter set to
-   *Never send it to Spam* keeps redirected mail out of Spam.
+   Gmail: *Forward it to* keeps the original sender. Outlook: use **Forward**, not Redirect. Redirected mail fails
+   Gmail's sender checks (it claims to be from LinkedIn but comes from Outlook's servers), so it lands in Spam or, for
+   senders with strict policies, is rejected outright. A forward comes from your own address, so tell the agent which
+   addresses forward to it and it reads each message as from the original sender in the forwarded header:
+   ```bash
+   go run ./cmd/consigliere secrets set Mail:ForwardedBy:0 you@outlook.com
+   ```
+   In the dedicated Gmail, a `from:you@outlook.com` filter set to *Never send it to Spam* keeps forwards out of Spam
+   (the agent reads Spam too, `Mail:IncludeSpam`, but the inbox is easier to check by eye).
 2. **Google Cloud OAuth client** (signed in as the dedicated account): create a project, enable the **Gmail API**,
    configure the OAuth consent screen (External) and **Publish app** to *In production* (in *Testing*, refresh tokens
    expire after 7 days). Create credentials → OAuth client ID → **Desktop app**.
@@ -74,6 +81,22 @@ message says what it found. Old interview requests don't reopen anything.
    ```
    Google warns the app is unverified; that's expected for a personal app (Advanced → continue).
 4. **Watchlist:** add `- { name: Alert emails, ats: email, board: gmail }` to `radar/watchlist.yaml`.
+
+## Alerts for companies with no public board
+
+Some companies (Apple, for one) don't post on Greenhouse, Lever or Ashby, and their careers sites forbid automated
+access. Their jobs still reach the agent through alert emails from a job site that lists them:
+
+1. On Glassdoor (or LinkedIn), search jobs for that company with the keywords you want, then turn on a **job alert**
+   for the search, sent by email, daily. One alert per search (for example, one for platform and SRE roles and one for
+   computer vision).
+2. Make sure the real inbox's forwarding filter covers the alert's sender (`from:glassdoor.com`). `glassdoor.com` is
+   already in `Mail:AllowedSenderDomains`.
+3. Put the company under `company_priority: high` in `radar/preferences.yaml` if its jobs should rank first.
+
+Alerts carry a title, location and a line or two, not the full posting, so their scores are rough. Open the ones worth
+it and judge from the posting itself. The agent never visits Glassdoor; the dashboard only links to it (each job and
+pursuit page has a **Company research** link to the company's reviews, pay reports and interview questions).
 
 ## Apply kits in the inbox
 

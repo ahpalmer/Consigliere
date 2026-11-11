@@ -208,6 +208,17 @@ func TestPeopleSearchLinksAreSearchURLsOnly(t *testing.T) {
 	}
 }
 
+func TestResearchLinksSearchGlassdoorForTheCompany(t *testing.T) {
+	links := ResearchLinks(" AT&T ")
+	if len(links) != 1 || links[0].URL != "https://www.glassdoor.com/Reviews/company-reviews.htm?sc.keyword=AT%26T" ||
+		!strings.HasPrefix(links[0].Label, "AT&T on Glassdoor") {
+		t.Fatal(links)
+	}
+	if ResearchLinks("  ") != nil {
+		t.Fatal("links for no company")
+	}
+}
+
 func TestNetworksMatchCompanyAndGeneral(t *testing.T) {
 	n, err := ParseNetworks("companies:\n  Google: [VetNet]\n  Amazon Web Services: [Warriors]\ngeneral: [ACP]\n")
 	if err != nil {

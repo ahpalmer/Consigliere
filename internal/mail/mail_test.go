@@ -50,6 +50,20 @@ func TestLinkedInJobIDs(t *testing.T) {
 	}
 }
 
+func TestGlassdoorJobIDs(t *testing.T) {
+	for u, want := range map[string]string{
+		"https://www.glassdoor.com/job-listing/senior-sre-apple-JV_IC1147401_KO0,10_KE11,16.htm?jl=1009512345678": "1009512345678",
+		"https://www.glassdoor.com/partner/jobListing.htm?pos=104&ao=1136043&jobListingId=1009512345678&cs=1":     "1009512345678",
+		"https://www.glassdoor.co.uk/job-listing/x.htm?src=GD_JOB_AD&jl=42":                                       "42",
+		"https://www.glassdoor.com/Reviews/Apple-Reviews-E1138.htm":                                               "",
+		"https://evil.example/?u=glassdoor.com/job-listing/x.htm?jl=7":                                            "",
+	} {
+		if got := GlassdoorJobID(u); got != want {
+			t.Errorf("%s: %q", u, got)
+		}
+	}
+}
+
 func TestPostedDateIsRelativeToTheEmail(t *testing.T) {
 	received := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
 	for posted, days := range map[string]int{"3 days ago": -3, "1 week ago": -7, "Just now": 0, "": 0} {
@@ -255,5 +269,63 @@ func TestReadingWithoutAnUpdate(t *testing.T) {
 	r, _ = parseReading(`{"items":[],"update":{"type":"rejection","company":"Acme","role":"SRE","when":"","deadline":"","summary":"No.","links":[]}}`)
 	if r.Update == nil || r.Update.Kind != UpdateRejection || r.Update.Company != "Acme" {
 		t.Fatalf("%+v", r.Update)
+	}
+}
+
+func TestForwardedSender(t *testing.T) {
+	cases := []struct{ text, want string }{
+		{"________________________________\nFrom: LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>\nSent: Monday\nSubject: Alert", "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>"},
+		{"From: Greenhouse <no-reply@greenhouse.io<mailto:no-reply@greenhouse.io>>\nTo: me", "Greenhouse <no-reply@greenhouse.io>"},
+		{"---------- Forwarded message ---------\nFrom: \"Acme Recruiting\" <jobs@acme.com>\nDate: Mon", "Acme Recruiting <jobs@acme.com>"},
+		{"From: no-reply@lever.co\n", "no-reply@lever.co"},
+		{"From: our team, with love\nFrom: Ashby <ats@ashbyhq.com>", "Ashby <ats@ashbyhq.com>"},
+	}
+	for _, c := range cases {
+		if got, ok := ForwardedSender(c.text); !ok || got != c.want {
+			t.Errorf("ForwardedSender(%q) = %q, %v; want %q", c.text, got, ok, c.want)
+		}
+	}
+	if _, ok := ForwardedSender("Hi, no header here"); ok {
+		t.Error("found a sender in a message with no forwarded header")
+	}
+}
+
+func TestReadsMailTheOwnerForwardedAsFromTheOriginalSender(t *testing.T) {
+	src, mb, ex, db := newSource(t)
+	src.ForwardedBy = []string{"owner@outlook.example"}
+	mb.messages["fwd"] = Message{ID: "fwd", From: "Owner <Owner@Outlook.example>", Subject: "FW: Your job alert",
+		HTML: `<div><b>From:</b> LinkedIn Job Alerts &lt;jobalerts-noreply@linkedin.com&gt;<br><b>Sent:</b> Monday<br><b>Subject:</b> Your job alert</div>` +
+			`<div><a href="https://www.linkedin.com/comm/jobs/view/222/">Platform Engineer</a> Acme</div>`}
+	mb.messages["sec"] = Message{ID: "sec", From: "owner@outlook.example", Subject: "FW: New sign-in",
+		Text: "From: Google <no-reply@accounts.google.com>\nSubject: New sign-in"}
+	mb.messages["fake"] = Message{ID: "fake", From: "Stranger <x@spam.example>", Subject: "FW: alert",
+		Text: "From: LinkedIn <jobalerts-noreply@linkedin.com>\nhttps://www.linkedin.com/jobs/view/333/"}
+	ex.listings = []Listing{{Title: "Platform Engineer", Company: "Acme", URL: "https://www.linkedin.com/comm/jobs/view/222/"}}
+
+	items, err := src.Fetch(context.Background(), radar.WatchedSource{})
+	if err != nil || len(items) != 1 || ex.calls != 1 {
+		t.Fatalf("items %d calls %d err %v", len(items), ex.calls, err)
+	}
+	if !strings.Contains(ex.texts[0], "From: LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>\nSubject: Your job alert\n") {
+		t.Errorf("reader saw %q", ex.texts[0])
+	}
+	var from, note string
+	db.QueryRow(`SELECT "From" FROM "ProcessedMessages" WHERE "Id" = 'fwd'`).Scan(&from)
+	db.QueryRow(`SELECT coalesce("Note", '') FROM "ProcessedMessages" WHERE "Id" = 'sec'`).Scan(&note)
+	if from != "LinkedIn Job Alerts <jobalerts-noreply@linkedin.com>" || note != noteNotAllowed {
+		t.Errorf("recorded from %q, security note %q", from, note)
+	}
+}
+
+func TestRereadsAForwardRecordedUnderTheOwnersAddress(t *testing.T) {
+	src, mb, ex, _ := newSource(t)
+	mb.messages["old"] = Message{ID: "old", From: "owner@outlook.example", Subject: "FW: Your job alert",
+		Text: "From: LinkedIn <jobalerts-noreply@linkedin.com>\nhttps://www.linkedin.com/jobs/view/444/"}
+	if _, err := src.Fetch(context.Background(), radar.WatchedSource{}); err != nil || ex.calls != 0 {
+		t.Fatalf("before ForwardedBy: calls %d err %v", ex.calls, err)
+	}
+	src.ForwardedBy = []string{"owner@outlook.example"}
+	if _, err := src.Fetch(context.Background(), radar.WatchedSource{}); err != nil || ex.calls != 1 {
+		t.Fatalf("after ForwardedBy: calls %d err %v", ex.calls, err)
 	}
 }

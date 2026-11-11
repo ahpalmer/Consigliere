@@ -63,27 +63,11 @@ type Answer struct {
 func (k *Kit) Build(ctx context.Context, job Job) (*Result, error) {
 	var notes []string
 
-	var people, similar []Connection
-	connectionsText, haveConnections, err := k.Pack.ReadText(ConnectionsPath)
+	who, err := k.People(job.Company)
 	if err != nil {
 		return nil, err
 	}
-	if haveConnections {
-		all, err := ParseConnections(strings.NewReader(connectionsText))
-		if err != nil {
-			notes = append(notes, fmt.Sprintf("Couldn't read %s: %v", ConnectionsPath, err))
-		}
-		people, similar = AtCompany(all, job.Company), SimilarCompany(all, job.Company)
-	}
-
-	var networks Networks
-	if text, ok, err := k.Pack.ReadText(NetworksPath); err != nil {
-		return nil, err
-	} else if ok {
-		if networks, err = ParseNetworks(text); err != nil {
-			notes = append(notes, err.Error())
-		}
-	}
+	notes = append(notes, who.Problems...)
 
 	profile, haveProfile, err := LoadProfile(k.Pack)
 	if err != nil {
@@ -141,30 +125,30 @@ func (k *Kit) Build(ctx context.Context, job Job) (*Result, error) {
 
 	fmt.Fprintf(&sb, "\nPeople you know at %s", job.Company)
 	switch {
-	case !haveConnections:
+	case !who.HaveExport:
 		sb.WriteString(": add your LinkedIn export as " + ConnectionsPath + " (LinkedIn → Settings → Data privacy → Get a copy of your data → Connections).\n")
-	case len(people) == 0:
+	case len(who.Known) == 0:
 		sb.WriteString(": none in your connections export.\n")
 	default:
-		fmt.Fprintf(&sb, " (%d):\n", len(people))
-		writePeople(&sb, people, false)
+		fmt.Fprintf(&sb, " (%d):\n", len(who.Known))
+		writePeople(&sb, who.Known, false)
 	}
-	if len(similar) > 0 {
+	if len(who.Similar) > 0 {
 		sb.WriteString("At similarly named companies (check it's the same one):\n")
-		writePeople(&sb, similar, true)
+		writePeople(&sb, who.Similar, true)
 	}
 
 	sb.WriteString("\nFind more (opens in your LinkedIn):\n")
-	for _, l := range PeopleSearchLinks(job.Company) {
+	for _, l := range who.Searches {
 		fmt.Fprintf(&sb, "• %s: %s\n", l.Label, l.URL)
 	}
 
-	if groups := networks.For(job.Company); len(groups) > 0 || len(networks.General) > 0 {
+	if len(who.Groups) > 0 || len(who.General) > 0 {
 		sb.WriteString("\nVeteran networks:\n")
-		for _, g := range groups {
+		for _, g := range who.Groups {
 			fmt.Fprintf(&sb, "• %s: %s\n", job.Company, g)
 		}
-		for _, g := range networks.General {
+		for _, g := range who.General {
 			sb.WriteString("• " + g + "\n")
 		}
 	}

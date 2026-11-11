@@ -140,7 +140,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	mailUpdates := &pipeline.MailUpdates{Pipeline: pipe, Channel: sender}
 	mailSource := &mail.Source{DB: db, Mailbox: gmailBox, Reader: mail.LLMReader{LLM: llmClient}, Clock: clk,
 		Query: cfg.Mail.Query, MaxMessages: cfg.Mail.MaxMessagesPerScan, AllowedDomains: cfg.Mail.AllowedSenderDomains,
-		UpdateDomains: cfg.Mail.UpdateSenderDomains, BlockedSenders: cfg.Mail.BlockedSenders, Companies: mailUpdates.Companies, Updates: mailUpdates}
+		UpdateDomains: cfg.Mail.UpdateSenderDomains, BlockedSenders: cfg.Mail.BlockedSenders, ForwardedBy: cfg.Mail.ForwardedBy, Companies: mailUpdates.Companies, Updates: mailUpdates}
 	scanner := &radar.Scanner{DB: db, Config: radarCfg, Clock: clk, FetchConcurrency: 6, Sources: []radar.Source{
 		radar.Greenhouse{HTTP: fetcher}, radar.Lever{HTTP: fetcher}, radar.Ashby{HTTP: fetcher}, radar.HackerNews{HTTP: fetcher},
 		mailSource,
