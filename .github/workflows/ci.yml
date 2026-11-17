@@ -53,16 +53,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Bicep (compile and lint, and both bots' parameters)
+      - name: Bicep (compile and lint, and every parameters file)
         env:
           CONSIGLIERE_OWNER_OBJECT_ID: 00000000-0000-0000-0000-000000000000
           CONSIGLIERE_BUDGET_EMAIL: ci@example.com
         run: |
-          az bicep build --file infra/main.bicep --stdout > /dev/null
+          for f in infra/main.bicep infra/dev.bicep; do az bicep build --file "$f" --stdout > /dev/null; done
           for p in infra/*.bicepparam; do az bicep build-params --file "$p" --stdout > /dev/null; done
 
       - name: Shell scripts
-        run: shellcheck -x deploy/*.sh deploy/vm/*.sh
+        run: shellcheck -x deploy/*.sh deploy/vm/*.sh deploy/dev/*.sh
 
       - name: systemd units
         run: |
