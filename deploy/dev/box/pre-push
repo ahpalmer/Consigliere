@@ -1,0 +1,12 @@
+#!/bin/sh
+# Installed by dev-sync in repos marked protect_main in code/repos.yaml. Those repos' default branch goes live without
+# a pull request (a bot syncs it every few minutes) and GitHub can't protect it, so pushes from the dev box go to a
+# branch, and the owner merges them on GitHub.
+default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's#^origin/##')
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+	if [ "$remote_ref" = "refs/heads/${default:-main}" ]; then
+		echo "Pushing to ${default:-main} is blocked on the dev box: push a branch and merge it on GitHub." >&2
+		exit 1
+	fi
+done
+exit 0

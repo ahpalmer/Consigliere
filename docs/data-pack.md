@@ -8,6 +8,7 @@ from `DataPack:Path`.
 <data-pack>/
   profile/    who the owner is (see below)
   radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll: boards, the HN thread, alert email)
+  code/       repos.yaml: the repositories on the dev box (optional; see dev-box.md)
   db/         SQLite database (gitignored in the pack; backed up to blob storage)
 ```
 

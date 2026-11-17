@@ -1,0 +1,11 @@
+#!/bin/sh
+# dev-kv-get <name> prints a secret from the dev box's Key Vault, signed in as the VM. The vault and identity names
+# are in /etc/consigliere-dev/env; tokens go through pipes, never arguments, so they don't show up in `ps`.
+set -eu
+# shellcheck disable=SC1091 # written by deploy/dev/setup.sh
+. /etc/consigliere-dev/env
+curl -fsS -H Metadata:true \
+	"http://169.254.169.254/metadata/identity/oauth2/token?api-version=2018-02-01&resource=https%3A%2F%2Fvault.azure.net&client_id=$AZURE_CLIENT_ID" |
+	python3 -c 'import json, sys; print("Authorization: Bearer " + json.load(sys.stdin)["access_token"])' |
+	curl -fsS -H @- "https://$KEY_VAULT_NAME.vault.azure.net/secrets/${1:?usage: dev-kv-get <name>}?api-version=7.4" |
+	python3 -c 'import json, sys; sys.stdout.write(json.load(sys.stdin)["value"])'

@@ -1,0 +1,61 @@
+#!/bin/sh
+# Keeps the repos on the dev box up to date (docs/dev-box.md); dev-sync.timer runs it as the dev user.
+#
+# The list is code/repos.yaml in the data pack, read from GitHub's copy (origin/HEAD), so it changes when a change to
+# it is pushed. Missing repos are cloned into ~/src/<name>. The rest are fetched, and a repo's default branch is
+# fast-forwarded only when it's checked out with no local changes. It never resets, switches branches or deletes
+# anything, and worktrees are left alone. A repo dropped from the list stays where it is.
+set -eu
+# shellcheck disable=SC1091 # written by deploy/dev/setup.sh
+. /etc/consigliere-dev/env
+src=$HOME/src
+pack=$src/$(basename "$DEV_PACK_REPO" .git)
+hook=/opt/consigliere-dev/pre-push
+mkdir -p "$src"
+
+# sync <name> <url> <protect_main: yes|no>
+sync() {
+	dir=$src/$1
+	if [ ! -d "$dir/.git" ]; then
+		echo "cloning $1"
+		git clone --quiet "$2" "$dir" || return 1
+	else
+		git -C "$dir" fetch --quiet --prune origin || return 1
+		default=$(git -C "$dir" symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')
+		branch=$(git -C "$dir" symbolic-ref --quiet --short HEAD || true)
+		if [ "$branch" = "$default" ] && [ -z "$(git -C "$dir" status --porcelain)" ]; then
+			git -C "$dir" merge --quiet --ff-only "origin/$default" 2>/dev/null ||
+				echo "$1: local $default has commits GitHub doesn't; left as is"
+		fi
+	fi
+	# Worktrees share the main checkout's hooks, so this covers every session in the repo.
+	if [ "$3" = yes ]; then
+		cp "$hook" "$dir/.git/hooks/pre-push"
+	elif cmp -s "$hook" "$dir/.git/hooks/pre-push"; then
+		rm "$dir/.git/hooks/pre-push"
+	fi
+}
+
+[ -d "$pack/.git" ] || git clone --quiet "$DEV_PACK_REPO" "$pack"
+git -C "$pack" fetch --quiet origin
+list=$(git -C "$pack" show origin/HEAD:code/repos.yaml | python3 -c '
+import re, sys, yaml
+for r in yaml.safe_load(sys.stdin)["repos"]:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", r["name"]) or r["name"] in (".", ".."):
+        sys.exit("bad repo name: %r" % r["name"])
+    if not re.fullmatch(r"https://github\.com/[A-Za-z0-9._/-]+", r["url"]):
+        sys.exit("only https://github.com URLs: %r" % r["url"])
+    print(r["name"], r["url"], "yes" if r.get("protect_main") else "no")
+')
+
+failed=0
+while read -r name url protect; do
+	[ -n "$name" ] || continue
+	sync "$name" "$url" "$protect" || {
+		echo "$name: sync failed" >&2
+		failed=1
+	}
+done <<EOF
+$list
+EOF
+exit $failed

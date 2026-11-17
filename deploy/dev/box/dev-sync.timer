@@ -1,0 +1,9 @@
+[Unit]
+Description=Sync the dev box's repos every hour
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

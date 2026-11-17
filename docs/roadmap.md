@@ -27,7 +27,7 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Planned |
 | **M15** | MCP server as its own program, calling the bot's API (branch `feature/m15-mcp`) | Phase 1 done |
 | **M16** | Dev box: a VM on the tailnet with Tailscale SSH and the toolchains, no Azure rights ([dev-box.md](dev-box.md)) | In progress |
-| **M17** | Repos on the dev box: synced from a list, pushes with one scoped, expiring GitHub token | Planned |
+| **M17** | Repos on the dev box: synced from a list, pushes with one scoped, expiring GitHub token | In progress |
 | **M18** | Claude Code Remote Control servers per repo, so sessions are driven from the Claude app | Planned |
 | **M19** | A **Code** section in the dashboard and `/code` in Telegram: repo status, start/stop sessions, wake/sleep the VM | Planned |
 
@@ -68,7 +68,9 @@ See [mcp.md](mcp.md).
 - **M16:** a separate dev box VM, reachable only over Tailscale SSH. **Built:** `infra/dev.bicep`, `deploy/dev.sh`,
   `deploy/dev/setup.sh`. **Next:** the owner deploys it and signs in.
 - **M17:** a timer clones and fetches the repos listed in the data pack, never touching uncommitted work. Pushes use a
-  fine-grained, expiring GitHub token read from Key Vault on each push. `main` stays behind PRs and CI.
+  fine-grained, expiring GitHub token read from Key Vault on each push. `main` stays behind PRs and CI, and data
+  repos (live on push, unprotectable on the free plan) refuse pushes to `main` from the box. **Built** with M16's
+  setup (`deploy/dev/box/`); **next:** the owner deploys both.
 - **M18:** one `claude remote-control --spawn worktree` server per repo, run by systemd inside tmux, so each repo
   shows up in the Claude app and every new session gets its own worktree. `claude --continue` sessions connect too.
 - **M19:** the bot fetches each repo's state from the dev box over the tailnet, shows it on the dashboard, and starts

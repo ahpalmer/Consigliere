@@ -12,7 +12,9 @@ sleep.
 | What | Where | Applied by |
 |---|---|---|
 | Azure resources: VM, network, Key Vault, identity, nightly shutdown, budget | `infra/dev.bicep`, `infra/dev.bicepparam` | you, with `az deployment sub create` |
-| The VM's setup: Tailscale SSH, the `dev` user, git, tmux, gh, Go, Node, Claude Code | `deploy/dev/setup.sh` | you, with `deploy/dev.sh setup` (safe to rerun) |
+| The VM's setup: Tailscale SSH, the `dev` user, git, tmux, gh, Go, Node, .NET, PowerShell, Claude Code | `deploy/dev/setup.sh` | you, with `deploy/dev.sh setup` (safe to rerun) |
+| What runs on it: repo sync, the GitHub token helpers, the push guard | `deploy/dev/box/` | copied in by `deploy/dev.sh setup` |
+| Which repos | `code/repos.yaml` in your data pack | you, by pushing a change to it |
 
 ## How it fits together
 
@@ -24,9 +26,22 @@ sleep.
   `deploy/dev.sh setup`, which runs as root through `az vm run-command`.
 - **Azure rights: its own vault only.** The VM's identity, `id-consigliere-dev`, can read the dev box's Key Vault and
   nothing else: no bot's resources, no subscription rights. The Azure CLI isn't installed.
-- **Tools.** Everything is pinned to a release at least two weeks old with its published SHA-256. Go and Node live in
-  `/usr/local`; `go install` and `npm -g` go to the user's home. Claude Code uses Anthropic's installer on the stable
-  channel and updates itself.
+- **Tools.** Everything is pinned to a release at least two weeks old with its published hash. Go, Node, the .NET 10
+  SDK (plus the .NET 8 runtime) and PowerShell 7 live in `/usr/local`; `go install`, `npm -g` and `dotnet tool` go to
+  the user's home. Claude Code uses Anthropic's installer on the stable channel and updates itself. Windows-only
+  projects (`net*-windows`) can be edited and compiled here, but run only on Windows.
+- **Repos.** `dev-sync.timer` reads `code/repos.yaml` from GitHub's copy of your data pack every hour (and at boot), clones
+  missing repos into `~/src/<name>` and fetches the rest. It fast-forwards a repo's default branch only when it's
+  checked out with no local changes, and never resets, switches branches or deletes anything.
+- **GitHub access: one token.** A fine-grained token for the listed repos only, with read/write on contents and pull
+  requests and nothing else. Without the Workflows permission, sessions can't change `.github/workflows`, which deploy
+  and reach Azure. It lives in the dev box's Key Vault; git (through `git-credential-keyvault`) and `gh` read it on
+  each use, so it's never on disk. Anything running as `dev` can read it too, so its scope and expiry are the limits.
+  Commits use your name and your GitHub noreply address.
+- **Data repos can't be pushed to `main`.** A bot syncs its data pack's `main` every few minutes, and GitHub's free plan
+  can't protect a private repo's branches, so a push there would go live with no review. Repos marked `protect_main`
+  get a pre-push hook that refuses `main`: sessions push a branch, and you merge it on GitHub. Code repos rely on
+  GitHub's rulesets (pull request + CI) instead.
 - **Sleep.** The VM shuts down (deallocated) every night at 03:00 Eastern, so a forgotten one doesn't bill all month.
   The disk and everything on it stay. Start it from the Azure app (Virtual machines → consigliere-dev → Start) or
   `deploy/dev.sh start`. M19 makes the bot wake it on demand and stop it when idle.
@@ -76,17 +91,41 @@ Run these from the repo root in Git Bash, signed in to your **personal** Azure a
    bash deploy/dev.sh tailscale-auth-key
    ```
 
-4. **Set up the VM** (about 5 minutes; rerun any time to update the tools):
+4. **GitHub token.** GitHub → Settings → Developer settings → Personal access tokens → *Fine-grained tokens* →
+   *Generate new token*:
+   - Name `consigliere-dev`, expiration 90 days, resource owner you.
+   - Repository access: *Only select repositories*, every repo in `code/repos.yaml`.
+   - Repository permissions: **Contents** and **Pull requests** read and write. Leave everything else at *No access*
+     (Metadata turns on by itself).
+
+   Save it (GitHub checks it and reads its expiry first):
    ```bash
+   bash deploy/dev.sh github-token
+   ```
+   To renew, make a new one the same way and run this again; the dev box uses it on the next push.
+
+5. **Repo list.** Put `code/repos.yaml` in your data pack and push it:
+   ```yaml
+   repos:
+     - { name: Consigliere, url: https://github.com/<you>/Consigliere.git }
+     - { name: Consigliere-data, url: https://github.com/<you>/Consigliere-data.git, protect_main: true }
+   ```
+
+6. **Set up the VM** (about 10 minutes the first time; rerun any time to update the tools):
+   ```bash
+   export DEV_PACK_REPO=https://github.com/<you>/<data pack>.git
+   export GIT_USER_NAME=<your name>
+   export GIT_USER_EMAIL=<id>+<you>@users.noreply.github.com   # GitHub → Settings → Emails
    bash deploy/dev.sh setup
    ```
-   It ends with `ready: ssh dev@consigliere-dev.<tailnet>.ts.net`.
+   It ends with the repos it has and `ready: ssh dev@consigliere-dev.<tailnet>.ts.net`.
 
-5. **Sign in.** With Tailscale on:
+7. **Sign in.** With Tailscale on:
    - **PC:** `ssh dev@consigliere-dev` (Windows' built-in OpenSSH works; so does `tailscale ssh dev@consigliere-dev`).
    - **Phone:** an SSH app such as Termius. Host `consigliere-dev`, user `dev`, no password or key.
 
-   Then check the tools: `go version`, `node --version`, `gh --version`, `claude --version`.
+   Then check: `ls ~/src`, `go version`, `node --version`, `dotnet --info`, `pwsh --version`, `gh auth status`,
+   `claude --version`.
 
 ## Everyday commands
 
@@ -95,3 +134,5 @@ bash deploy/dev.sh start   # start it (about a minute)
 bash deploy/dev.sh stop    # stop and deallocate: compute stops billing, the disk stays
 bash deploy/dev.sh setup   # reapply the setup, e.g. after bumping a pinned version
 ```
+
+On the dev box, run `dev-sync` to sync right away and see what it does.
