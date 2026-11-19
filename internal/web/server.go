@@ -16,6 +16,7 @@ import (
 
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/clock"
+	"github.com/ahpalmer/consigliere/internal/devbox"
 	"github.com/ahpalmer/consigliere/internal/llm"
 	"github.com/ahpalmer/consigliere/internal/pipeline"
 	"github.com/ahpalmer/consigliere/internal/radar"
@@ -36,6 +37,8 @@ type Server struct {
 	State       *agent.State
 	Usage       *llm.UsageTracker
 	Clock       clock.Clock
+	// The Code page, when the data pack sets up a dev box.
+	Code *devbox.Box
 	// Overrides the embedded app (tests).
 	Assets fs.FS
 }

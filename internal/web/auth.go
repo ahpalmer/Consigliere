@@ -34,7 +34,9 @@ func (s *Server) signedIn(r *http.Request) bool {
 func equal(a, b string) bool { return subtle.ConstantTimeCompare([]byte(a), []byte(b)) == 1 }
 
 func (s *Server) getSession(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]bool{"signInRequired": s.Token != "", "signedIn": s.signedIn(r)})
+	signedIn := s.signedIn(r)
+	// code: whether to show the Code page, told only to someone signed in.
+	writeJSON(w, http.StatusOK, map[string]bool{"signInRequired": s.Token != "", "signedIn": signedIn, "code": signedIn && s.codeEnabled()})
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {

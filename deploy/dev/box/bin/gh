@@ -1,10 +1,10 @@
 #!/bin/sh
 # The GitHub CLI with the dev box's GitHub token from Key Vault, read fresh each run and never stored. Installed
-# ahead of /usr/bin/gh on the PATH.
+# as `gh` (the real one, /usr/local/gh/bin/gh, is not on the PATH).
 set -eu
 GH_TOKEN=$(dev-kv-get github-token) || {
 	echo "no github-token in the dev box's Key Vault yet (deploy/dev.sh github-token)" >&2
 	exit 1
 }
 export GH_TOKEN
-exec /usr/bin/gh "$@"
+exec /usr/local/gh/bin/gh "$@"

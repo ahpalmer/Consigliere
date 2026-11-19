@@ -3,6 +3,7 @@ import { NavLink, Route, Routes } from "react-router-dom";
 import { api } from "./api";
 import { SessionContext } from "./session";
 import { Board } from "./pages/Board";
+import { Code } from "./pages/Code";
 import { ItemPage } from "./pages/ItemPage";
 import { Login } from "./pages/Login";
 import { Options } from "./pages/Options";
@@ -15,11 +16,13 @@ type Gate = "checking" | "signed-in" | "signed-out" | "offline";
 export function App() {
   const [gate, setGate] = useState<Gate>("checking");
   const [signInRequired, setSignInRequired] = useState(false);
+  const [code, setCode] = useState(false);
 
   const check = useCallback(async () => {
     try {
       const s = await api.session();
       setSignInRequired(s.signInRequired);
+      setCode(s.code ?? false);
       setGate(s.signedIn ? "signed-in" : "signed-out");
     } catch {
       setGate("offline");
@@ -46,7 +49,7 @@ export function App() {
       </main>
     );
   }
-  if (gate === "signed-out") return <Login onSignedIn={() => setGate("signed-in")} />;
+  if (gate === "signed-out") return <Login onSignedIn={() => void check()} />;
 
   return (
     <SessionContext.Provider value={{ signInRequired, signedOut }}>
@@ -64,6 +67,7 @@ export function App() {
             </NavLink>
             <NavLink to="/suggested">Suggested</NavLink>
             <NavLink to="/options">Options</NavLink>
+            {code && <NavLink to="/code">Code</NavLink>}
             <NavLink to="/status">Status</NavLink>
           </nav>
           {signInRequired && (
@@ -87,6 +91,7 @@ export function App() {
           <Route path="/options" element={<Options />} />
           <Route path="/items/:id" element={<ItemPage />} />
           <Route path="/status" element={<StatusPage />} />
+          {code && <Route path="/code" element={<Code />} />}
           <Route path="*" element={<p className="muted">Nothing here.</p>} />
         </Routes>
       </main>

@@ -1,8 +1,8 @@
 # The dev box
 
 A VM where Claude Code works on your repositories while your own computer is off (M16-M19 in the
-[roadmap](roadmap.md)). You reach it two ways: Tailscale SSH for a shell, and later (M18) the Claude app, through Claude
-Code's Remote Control.
+[roadmap](roadmap.md)). You reach it two ways: Tailscale SSH for a shell, and the Claude app, through Claude Code's Remote
+Control, with sessions opened from the dashboard's [Code page](#the-code-page).
 
 It's kept apart from the bots on purpose: its own resource group, network, Key Vault and identity. Claude Code
 sessions run commands and read outside text (web pages, issues, packages), so a session that gets talked into
@@ -13,7 +13,7 @@ sleep.
 |---|---|---|
 | Azure resources: VM, network, Key Vault, identity, nightly shutdown, budget | `infra/dev.bicep`, `infra/dev.bicepparam` | you, with `az deployment sub create` |
 | The VM's setup: Tailscale SSH, the `dev` user, git, tmux, gh, Go, Node, .NET, PowerShell, Claude Code | `deploy/dev/setup.sh` | you, with `deploy/dev.sh setup` (safe to rerun) |
-| What runs on it: repo sync, the GitHub token helpers, the push guard | `deploy/dev/box/` | copied in by `deploy/dev.sh setup` |
+| What runs on it: repo sync, the GitHub token helpers, the push guard, the agent for the Code page | `deploy/dev/box/` | copied in by `deploy/dev.sh setup` |
 | Which repos | `code/repos.yaml` in your data pack | you, by pushing a change to it |
 
 ## How it fits together
@@ -43,8 +43,8 @@ sleep.
   get a pre-push hook that refuses `main`: sessions push a branch, and you merge it on GitHub. Code repos rely on
   GitHub's rulesets (pull request + CI) instead.
 - **Sleep.** The VM shuts down (deallocated) every night at 03:00 Eastern, so a forgotten one doesn't bill all month.
-  The disk and everything on it stay. Start it from the Azure app (Virtual machines → consigliere-dev → Start) or
-  `deploy/dev.sh start`. M19 makes the bot wake it on demand and stop it when idle.
+  The disk and everything on it stay, Claude's conversations included. The Code page wakes it; so do the Azure app
+  (Virtual machines → consigliere-dev → Start) and `deploy/dev.sh start`.
 
 ## Cost
 
@@ -126,6 +126,41 @@ Run these from the repo root in Git Bash, signed in to your **personal** Azure a
 
    Then check: `ls ~/src`, `go version`, `node --version`, `dotnet --info`, `pwsh --version`, `gh auth status`,
    `claude --version`.
+
+## The Code page
+
+The dashboard's Code page lists the repos in `code/repos.yaml`. Each is **Active** (green) while it has a Claude Code
+session open, or **Inactive** (red), with two buttons:
+
+- **Continue Coding** opens a session in the repo running `claude --continue`: its last conversation, or a new one if
+  it has none. If the repo already has a session open, it says so instead of forking that conversation.
+- **New Session** opens another session with a new conversation, next to any already open.
+
+Either way the session runs with Remote Control on, so a few seconds later it's in the Claude app → Code, named
+`<repo>-<n>`. If the dev box is asleep, the button wakes it first, and the session opens about a minute later; the
+page shows the progress. Any number of sessions can be open at once, across repos and in the same one, though two in
+one repo edit the same files. A session ends when Claude does (`/exit`, from the app too) and when the VM sleeps at
+03:00; the conversation stays on disk for the next Continue Coding.
+
+How it works:
+
+- **The agent** (`deploy/dev/box/bin/dev-agent`, `dev-agent.service`, as `dev`) answers on the dev box's tailnet
+  address, port 8790, and only to tailnet machines tagged `tag:consigliere` (it asks `tailscale whois` who's calling).
+  It can list sessions and open one, nothing else. A session is a tmux session running `dev-session`, which starts
+  `claude [--continue] --remote-control=<name>` in `~/src/<repo>`. Over SSH, `tmux ls` lists them and
+  `tmux attach -t <name>` shows the terminal (Ctrl+B then D to leave it running).
+- **Waking:** when the agent doesn't answer, the bot asks Azure for the VM's state and starts it, as its own identity
+  (`id-consigliere-app`), which has a custom role on this one VM: read it and start it. It can't stop or change the VM,
+  or run commands on it.
+- **Settings** live in the data pack, so only a bot whose pack has them gets the page:
+  ```yaml
+  dev_box:
+    agent: http://consigliere-dev.<tailnet>.ts.net:8790
+    vm: /subscriptions/<id>/resourceGroups/rg-consigliere-dev/providers/Microsoft.Compute/virtualMachines/consigliere-dev
+  ```
+- **Each repo is trusted once.** Claude Code asks "trust this folder?" the first time it runs in a folder, and a
+  session waiting on that question never reaches the app. Answer it over SSH once per repo (`cd ~/src/<repo>`,
+  `claude`, Yes, `/exit`), including for repos added later.
 
 ## Everyday commands
 

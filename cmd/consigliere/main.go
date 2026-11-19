@@ -32,6 +32,7 @@ import (
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/config"
 	"github.com/ahpalmer/consigliere/internal/datapack"
+	"github.com/ahpalmer/consigliere/internal/devbox"
 	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/llm"
 	"github.com/ahpalmer/consigliere/internal/mail"
@@ -200,7 +201,8 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 			return err
 		}
 		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Suggestions: suggestions, Feedback: feedback,
-			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk}
+			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk,
+			Code: &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv()}}
 	}
 
 	// Run until Ctrl+C / SIGTERM, then stop in order: polling, scheduling and the dashboard first, then background

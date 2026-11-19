@@ -11,6 +11,7 @@ A React + TypeScript app (`web/`) served by the agent itself. `npm run build` wr
 | Options | Every scored job, ranked, with search and tier, category and score filters. Browsing doesn't mark anything as sent, so the Telegram digest is unaffected. |
 | Item | One posting: why it scored the way it did, the posting text, a Glassdoor link for researching the company, 👍/👎, Make active. |
 | Status | Kill switch, scoring backlog, Claude usage since start, last run of every source. |
+| Code | Only when the data pack sets up a dev box ([dev-box.md](dev-box.md#the-code-page)): each repo, active or not, with **Continue Coding** and **New Session**, which wake the dev box first when it's asleep. |
 
 Telegram and the dashboard share everything: a draft started from either one shows up in the dashboard, and a step
 ticked in one is ticked in the other.

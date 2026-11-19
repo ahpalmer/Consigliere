@@ -75,6 +75,9 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/suggestions", s.suggestions)
 	mux.HandleFunc("POST /api/items/{id}/kit", s.prepareKit)
 	mux.HandleFunc("POST /api/items/{id}/applied", s.appliedItem)
+
+	mux.HandleFunc("GET /api/code", s.codeStatus)
+	mux.HandleFunc("POST /api/code/repos/{repo}/sessions", s.startCodeSession)
 }
 
 // --- JSON shapes ---
