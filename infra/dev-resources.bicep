@@ -9,6 +9,7 @@ param shutdownTime string
 param monthlyBudget int
 param budgetEmail string
 param budgetStartDate string
+param botPrincipalId string
 
 var suffix = uniqueString(resourceGroup().id)
 
@@ -213,6 +214,38 @@ resource ownerSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', roles.keyVaultSecretsOfficer)
     principalId: ownerObjectId
     principalType: 'User'
+  }
+}
+
+// The owner's bot may see whether this VM is running and start it (the dashboard's Code page), and nothing more: not
+// stop or change it, and not run commands on it (run-command would be root on the box, and so the GitHub token).
+resource vmStarter 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
+  name: guid(resourceGroup().id, 'vm-starter')
+  properties: {
+    roleName: 'Consigliere dev box starter (${resourceGroup().name})'
+    description: 'Read the dev box VM and its power state, and start it.'
+    type: 'CustomRole'
+    permissions: [
+      {
+        actions: [
+          'Microsoft.Compute/virtualMachines/read'
+          'Microsoft.Compute/virtualMachines/instanceView/read'
+          'Microsoft.Compute/virtualMachines/start/action'
+        ]
+        notActions: []
+      }
+    ]
+    assignableScopes: [resourceGroup().id]
+  }
+}
+
+resource botStartsVm 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
+  name: guid(vm.id, botPrincipalId, 'vm-starter')
+  scope: vm
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', vmStarter.name) // role assignments take the subscription-level ID
+    principalId: botPrincipalId
+    principalType: 'ServicePrincipal'
   }
 }
 

@@ -35,6 +35,14 @@ param budgetEmail string
 @description('First month of the budget (yyyy-MM-01). Keep it fixed: a budget\'s start date can\'t move once created.')
 param budgetStartDate string
 
+@description('The owner\'s bot (infra/main.bicep): its identity may start this VM, for the dashboard\'s Code page.')
+param botResourceGroupName string = 'rg-consigliere'
+
+resource botIdentity 'Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31' existing = {
+  scope: resourceGroup(botResourceGroupName)
+  name: 'id-consigliere-app'
+}
+
 resource rg 'Microsoft.Resources/resourceGroups@2024-03-01' = {
   name: resourceGroupName
   location: location
@@ -53,6 +61,7 @@ module resources 'dev-resources.bicep' = {
     monthlyBudget: monthlyBudget
     budgetEmail: budgetEmail
     budgetStartDate: budgetStartDate
+    botPrincipalId: botIdentity.properties.principalId
   }
 }
 

@@ -1183,3 +1183,36 @@ tr.failed td {
     grid-column: 1 / -1;
   }
 }
+
+/* --- code page --- */
+
+.repo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.repo-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem 0.75rem;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.repo-list li:last-child {
+  border-bottom: 0;
+}
+
+.repo-name {
+  flex: 1 1 9rem;
+  min-width: 0;
+  font-weight: 650;
+  overflow-wrap: anywhere;
+}
+
+.repo-note {
+  flex-basis: 100%;
+  font-size: 0.85rem;
+}

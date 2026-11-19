@@ -62,7 +62,9 @@ jobs:
           for p in infra/*.bicepparam; do az bicep build-params --file "$p" --stdout > /dev/null; done
 
       - name: Shell scripts
-        run: shellcheck -x deploy/*.sh deploy/vm/*.sh deploy/dev/*.sh deploy/dev/box/bin/* deploy/dev/box/pre-push
+        run: |
+          shellcheck -x deploy/*.sh deploy/vm/*.sh deploy/dev/*.sh $(grep -l '^#!/bin/sh' deploy/dev/box/bin/*) deploy/dev/box/pre-push
+          python3 -m py_compile deploy/dev/box/bin/dev-agent
 
       - name: systemd units
         run: |
@@ -70,7 +72,7 @@ jobs:
           sudo mkdir -p /opt/consigliere/current/deploy/vm
           sudo touch /opt/consigliere/current/consigliere /opt/consigliere/current/deploy/vm/datapack-sync.sh
           sudo chmod +x /opt/consigliere/current/consigliere /opt/consigliere/current/deploy/vm/datapack-sync.sh
-          sudo touch /usr/local/bin/dev-sync && sudo chmod +x /usr/local/bin/dev-sync
+          sudo touch /usr/local/bin/dev-sync /usr/local/bin/dev-agent && sudo chmod +x /usr/local/bin/dev-sync /usr/local/bin/dev-agent
           sudo useradd --system consigliere
           sudo useradd dev
           systemd-analyze verify deploy/vm/*.service deploy/vm/*.timer deploy/dev/box/*.service deploy/dev/box/*.timer

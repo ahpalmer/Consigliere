@@ -24,6 +24,7 @@ DOTNET8_RUNTIME_VERSION=8.0.33
 PWSH_VERSION=7.6.9
 case $(uname -m) in
 aarch64)
+	gh_file=gh_${GH_VERSION}_linux_arm64.tar.gz gh_sha=ee32df2323c8847f5fac6cb6b4b69ca75828e9329a8f22f677021f7b3306ce63
 	go_file=go$GO_VERSION.linux-arm64.tar.gz go_sha=a06e99309dbcbdca1a8ccd2282c3ee146e55930886e26b4f1193269587165f49
 	node_file=node-v$NODE_VERSION-linux-arm64.tar.xz node_sha=6287aa46b6c375d816e63ae66d024fbbfd70404825aabdfdf898a970871d2f4b
 	sdk_file=dotnet-sdk-$DOTNET_SDK_VERSION-linux-arm64.tar.gz
@@ -33,6 +34,7 @@ aarch64)
 	pwsh_file=powershell-$PWSH_VERSION-linux-arm64.tar.gz pwsh_sha=02eb9991af447c7e7fe881acde195961afd397c40b8eb1c2b3856b84ec2d85f2
 	;;
 x86_64)
+	gh_file=gh_${GH_VERSION}_linux_amd64.tar.gz gh_sha=4c806978ffce1cec70853302a56d70ac6da4f19bae7adca4e1a8ab00633dd91d
 	go_file=go$GO_VERSION.linux-amd64.tar.gz go_sha=65efbc80fdc1fa2cd2631cad5b481777a68e8725f34e89f50fc6ac714e379b40
 	node_file=node-v$NODE_VERSION-linux-x64.tar.xz node_sha=1805bcd35e6815559bd2eb97db438d3fdb0eb3a5e6a977b7c1badca76337e9ce
 	sdk_file=dotnet-sdk-$DOTNET_SDK_VERSION-linux-x64.tar.gz
@@ -45,6 +47,7 @@ x86_64)
 esac
 box=/opt/consigliere-dev
 export DEBIAN_FRONTEND=noninteractive
+cd / # run-command starts in a root-only directory, where commands run as dev fail
 log() { echo "==> $*"; }
 
 # unpack <url> <sha256 or sha512> <dir> [tar options] downloads, checks the hash and unpacks into <dir>.
@@ -64,14 +67,18 @@ unpack() {
 . /etc/os-release
 curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.noarmor.gpg" -o /usr/share/keyrings/tailscale-archive-keyring.gpg
 curl -fsSL "https://pkgs.tailscale.com/stable/ubuntu/$VERSION_CODENAME.tailscale-keyring.list" -o /etc/apt/sources.list.d/tailscale.list
-curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg -o /usr/share/keyrings/githubcli-archive-keyring.gpg
-echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" >/etc/apt/sources.list.d/github-cli.list
+# GitHub's apt repo keeps only the newest gh, so gh comes from its release tarball like the tools below.
+rm -f /etc/apt/sources.list.d/github-cli.list
 log "installing packages"
 apt-get -qq -o DPkg::Lock::Timeout=600 update >/dev/null
 apt-get -qq -y -o DPkg::Lock::Timeout=600 install --allow-downgrades --allow-change-held-packages \
-	git tmux build-essential jq ripgrep zstd xz-utils python3-yaml libicu74 \
-	"tailscale=$TAILSCALE_VERSION" "gh=$GH_VERSION" >/dev/null
-apt-mark hold tailscale gh >/dev/null
+	git tmux build-essential jq ripgrep zstd xz-utils python3-yaml libicu74 "tailscale=$TAILSCALE_VERSION" >/dev/null
+apt-mark hold tailscale >/dev/null
+
+if ! /usr/local/gh/bin/gh --version 2>/dev/null | grep -q "^gh version $GH_VERSION "; then
+	log "installing gh $GH_VERSION"
+	rm -rf /usr/local/gh && unpack "https://github.com/cli/cli/releases/download/v$GH_VERSION/$gh_file" "$gh_sha" /usr/local/gh --strip-components=1
+fi
 
 if [ "$(/usr/local/go/bin/go version 2>/dev/null || true)" != "go version go$GO_VERSION linux/$(dpkg --print-architecture)" ]; then
 	log "installing Go $GO_VERSION"
@@ -126,7 +133,7 @@ rm -rf "$box.new" && mkdir -p "$box.new"
 echo "$DEV_FILES" | base64 -d | tar -xz -C "$box.new" --strip-components=1
 chown -R root:root "$box.new" && chmod -R go-w,a+rX "$box.new" && chmod 755 "$box.new"/bin/* "$box.new/pre-push"
 rm -rf "$box" && mv "$box.new" "$box"
-cp "$box"/bin/* /usr/local/bin/ # gh here wraps /usr/bin/gh
+cp "$box"/bin/* /usr/local/bin/ # gh here wraps /usr/local/gh/bin/gh
 cp "$box"/*.service "$box"/*.timer /etc/systemd/system/
 systemctl daemon-reload
 
@@ -176,6 +183,12 @@ if dev-kv-get github-token >/dev/null 2>&1; then
 else
 	log "no github-token in $KEY_VAULT_NAME yet: repos sync once it's saved (deploy/dev.sh github-token)"
 fi
+
+# ---------- The agent: the dashboard's Code page ----------
+
+# Restarting it leaves open sessions running (KillMode=process).
+systemctl enable --quiet dev-agent.service
+systemctl restart dev-agent.service
 
 log "go $GO_VERSION, node $NODE_VERSION, .NET $DOTNET_SDK_VERSION, pwsh $PWSH_VERSION, gh $GH_VERSION, claude $(runuser -l dev -c 'claude --version' 2>/dev/null | head -1)"
 # shellcheck disable=SC2012 # repo names from code/repos.yaml, checked by dev-sync

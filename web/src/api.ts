@@ -180,6 +180,30 @@ export interface Status {
   }[];
 }
 
+/** A Claude Code session on the dev box: a terminal in one repo, reachable from the Claude app. */
+export interface CodeSession {
+  name: string;
+  repo: string;
+  startedAt: string;
+}
+
+export interface CodeRepo {
+  name: string;
+  sessions: CodeSession[];
+  /** A session asked for while the dev box was asleep, opened once it's up. */
+  waiting: "" | "continue" | "new";
+  error: string;
+}
+
+export type DevBoxState = "running" | "booting" | "starting" | "asleep" | "stopping" | "deallocating" | "unknown";
+
+export interface CodeStatus {
+  enabled: boolean;
+  vm: DevBoxState;
+  vmError: string;
+  repos: CodeRepo[];
+}
+
 export class SignInRequired extends Error {
   constructor() {
     super("Sign in required");
@@ -217,7 +241,7 @@ const get = <T>(path: string) => request<T>("GET", path);
 const send = <T>(method: string, path: string, body?: unknown) => request<T>(method, path, body);
 
 export const api = {
-  session: () => get<{ signInRequired: boolean; signedIn: boolean }>("/api/session"),
+  session: () => get<{ signInRequired: boolean; signedIn: boolean; code?: boolean }>("/api/session"),
   login: (token: string) => send<{ signedIn: boolean }>("POST", "/api/login", { token }),
   logout: () => send<{ signedIn: boolean }>("POST", "/api/logout"),
 
@@ -264,4 +288,8 @@ export const api = {
   suggestions: () => get<SuggestionsPage>("/api/suggestions"),
   prepareKit: (itemId: number) => send<Draft>("POST", `/api/items/${itemId}/kit`),
   appliedItem: (itemId: number) => send<Pursuit>("POST", `/api/items/${itemId}/applied`),
+
+  code: () => get<CodeStatus>("/api/code"),
+  startCodeSession: (repo: string, mode: "continue" | "new") =>
+    send<{ session: string; waking: boolean }>("POST", `/api/code/repos/${encodeURIComponent(repo)}/sessions`, { mode }),
 };

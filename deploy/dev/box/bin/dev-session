@@ -1,0 +1,14 @@
+#!/bin/sh
+# dev-session <repo> <continue|new> <name> runs Claude Code in ~/src/<repo> with Remote Control on, so the session
+# shows up in the Claude app as <name>. dev-agent starts it as the command of a tmux session of the same name, which
+# ends when Claude does. "continue" picks up the repo's last conversation when it has one, else starts a new one.
+set -eu
+# shellcheck disable=SC1091 # the VM's: puts claude and the toolchains on the PATH
+. /etc/profile.d/dev-tools.sh
+cd "$HOME/src/$1"
+# Claude Code keeps a folder's conversations in ~/.claude/projects/<its path, with non-alphanumerics as dashes>.
+history="$HOME/.claude/projects/$(pwd | sed 's/[^A-Za-z0-9]/-/g')"
+if [ "$2" = continue ] && ls "$history"/*.jsonl >/dev/null 2>&1; then
+	exec claude --continue --remote-control="$3"
+fi
+exec claude --remote-control="$3"

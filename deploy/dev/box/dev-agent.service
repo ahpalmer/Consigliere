@@ -1,0 +1,17 @@
+[Unit]
+Description=Lists and starts Claude Code sessions for the owner's bot (docs/dev-box.md)
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+User=dev
+Environment=LANG=C.UTF-8
+ExecStart=/usr/local/bin/dev-agent
+Restart=always
+RestartSec=5
+# Sessions run in tmux, which the agent starts and which outlives it: restarting the agent mustn't end them.
+KillMode=process
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target
