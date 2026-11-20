@@ -1,0 +1,56 @@
+# The owner's current pay package, for comparing offers against (the pursuit page's Offers panel). Fake numbers.
+# Amounts are yearly US dollars. Every section can carry its own as_of date (when you last checked it), falling back
+# to the one at the top; the comparison warns about numbers older than a year, and stock prices older than 3 months.
+as_of: 2026-10-01
+start_date: 2023-04-03 # when you started
+
+base:
+  amount: 172000
+  as_of: 2026-04-01
+
+bonus:
+  target_percent: 12 # or amount: <dollars>
+  pays_on: 03-15     # MM-DD: when it pays out, to work out what leaving forfeits
+
+# A sign-on bonus that's repaid when leaving inside clawback_months of paid_on. Delete once that's passed.
+# sign_on: { amount: 15000, paid_on: 2026-04-01, clawback_months: 12 }
+
+equity:
+  # kind: public (RSUs in a listed company) or private (startup shares or options: paper value, shown apart).
+  # Give shares and price (then only the price needs updating), or a dollar value. Vesting runs from granted.
+  - label: New-hire grant
+    kind: public
+    shares: 900
+    price: 210
+    granted: 2023-04-03
+    years: 4
+    cliff_months: 12
+    every_months: 3
+    as_of: 2026-10-01 # the price's date
+  - label: 2025 refresh
+    kind: public
+    shares: 300
+    price: 210
+    granted: 2025-03-01
+    years: 4
+    every_months: 3
+    percent_by_year: [25, 25, 25, 25] # optional, for uneven splits like [5, 15, 40, 40]
+    as_of: 2026-10-01
+
+  # Or a steady yearly amount from stacked refreshers, counted every year with nothing forfeited:
+  # - { label: Refreshers, kind: public, annual: 12000 }
+
+retirement:
+  match_percent: 50  # the employer adds 50% of what you put in...
+  up_to_percent: 6   # ...on up to 6% of base (leave out when there's no limit)
+  contribution: 23000 # what you put in a year; both packages' matches are worked out on it
+  unvested_balance: 2400 # employer money you'd lose by leaving now
+  vests_on: 2027-04-03
+
+health:
+  annual_cost: 2880 # your share of premiums, per year
+  employer_hsa: 500
+
+perks:
+  - { name: Learning budget, annual: 1500 }
+  - { name: Wellness stipend, annual: 600 }

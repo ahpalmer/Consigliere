@@ -4,6 +4,7 @@ import { api, type Draft, type DraftKind, type People, type Person, type Pursuit
 import { Badge, ErrorNote, External, Fit, Panel, StageBadge } from "../components";
 import { completion, dateTime, eventText, nextWorkdayMorning, outcomeLabels, relativeDay, shortDate, toLocalInput } from "../format";
 import { useAction, useLoad } from "../hooks";
+import { Offers } from "./Offers";
 
 export const coverHint =
   "A one-page letter as a Word file, written from your resume, wins and stories plus what you add here. Questions you ask get answered in notes below the letter, not in it.";
@@ -82,6 +83,9 @@ export function PursuitPage() {
           <Drafts p={p} drafts={detail.data.drafts} onChange={reload} />
           <Timeline detail={detail.data} />
         </div>
+      </div>
+      <div className="stack offers-section">
+        <Offers pursuitId={p.id} />
       </div>
     </>
   );

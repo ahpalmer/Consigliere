@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completion, eventText, fitBand, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
+import { completion, eventText, fitBand, fitTitle, money, moneyK, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
 
 describe("relativeDay", () => {
   const now = new Date(2026, 9, 28, 9, 0); // Wed Oct 28, local
@@ -48,5 +48,32 @@ describe("labels", () => {
   });
   it("abbreviates token counts", () => {
     expect([tokens(950), tokens(4_100), tokens(2_500_000)]).toEqual(["950", "4.1K", "2.5M"]);
+  });
+});
+
+describe("money", () => {
+  it("formats whole dollars, signing differences when asked", () => {
+    expect(money(185000)).toBe("$185,000");
+    expect(money(-12500)).toBe("-$12,500");
+    expect(money(0, true)).toBe("$0");
+    expect(money(40000, true)).toBe("+$40,000");
+    expect(money(-40000, true)).toBe("-$40,000");
+  });
+});
+
+describe("moneyK", () => {
+  it("shortens to thousands, one decimal when needed", () => {
+    expect(moneyK(172000)).toBe("$172K");
+    expect(moneyK(236895)).toBe("$236.9K");
+    expect(moneyK(-12000)).toBe("-$12K");
+    expect(moneyK(400)).toBe("$0.4K");
+  });
+});
+
+describe("fitTitle", () => {
+  it("spells out the parts of fit, and any priority adjustment", () => {
+    const parts = { resume: 88, location: 75, pay: 50, payListed: false, fit: 78 };
+    expect(fitTitle({ rankScore: 78, fitParts: parts })).toBe("Fit 78: Resume 88 · Location 75 · Pay 50 (none listed)");
+    expect(fitTitle({ rankScore: 93, fitParts: { ...parts, pay: null } })).toBe("Fit 78: Resume 88 · Location 75, plus 15 for company priority");
   });
 });

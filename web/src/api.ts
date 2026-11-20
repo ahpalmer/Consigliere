@@ -132,7 +132,38 @@ export interface Option {
   feedback: number | null;
   sent: boolean;
   pursuit: { id: number; ref: string; stage: Stage } | null;
+  /** The listed pay against what you make now; null when none is listed or there's no current package. */
+  pay: PostingPay | null;
+  /** How fit is made up. rankScore is fitParts.fit plus any priority-company adjustment. */
+  fitParts: FitParts;
 }
+
+export interface FitParts {
+  /** The model's resume match; null until scored. */
+  resume: number | null;
+  location: number;
+  /** Null when there's no current package to compare pay with. */
+  pay: number | null;
+  /** False when the posting lists no pay and pay is the stand-in score. */
+  payListed: boolean;
+  fit: number;
+}
+
+/** What you make now: base, and total yearly pay (bonus, match, stock, health, perks). */
+export interface PayNow {
+  base: number;
+  total: number;
+}
+
+/** A posting's listed range (usually base) against pay now: listed minus now, [low, high]. */
+export interface PostingPay {
+  verdict: "above" | "overlaps" | "below";
+  vsBase: [number, number];
+  vsTotal: [number, number];
+  now: PayNow;
+}
+
+export type PayFilter = "" | "listed" | "reach" | "beats";
 
 export interface OptionsPage {
   options: Option[];
@@ -141,6 +172,7 @@ export interface OptionsPage {
   categories: string[];
   unscored: number;
   defaultMinScore: number;
+  payNow: PayNow | null;
 }
 
 /** An option to act on: high ones to make active, medium ones with a prepared application. */
@@ -202,6 +234,56 @@ export interface CodeStatus {
   vm: DevBoxState;
   vmError: string;
   repos: CodeRepo[];
+}
+
+/** One row of a package in an offer comparison: whole dollars per year, and the total. */
+export interface CompLine {
+  label: string;
+  amounts: number[];
+  total: number;
+  note: string;
+}
+
+export interface CompColumn {
+  lines: CompLine[];
+  totals: number[];
+  total: number;
+  /** Private equity: paper value, never counted in totals. */
+  private: CompLine[];
+}
+
+export interface Forfeit {
+  label: string;
+  amount: number;
+  note: string;
+  private: boolean;
+}
+
+export interface Comparison {
+  start: string;
+  years: number;
+  current: CompColumn;
+  incoming: CompColumn;
+  difference: number[];
+  differenceTotal: number;
+  forfeited: Forfeit[];
+  questions: string[];
+  assumptions: string[];
+  warnings: string[];
+  notes: string[];
+}
+
+/** An offer pasted in on a pursuit: the text, the package read from it (YAML), and how it compares. */
+export interface Offer {
+  id: number;
+  pursuitId: number;
+  text: string;
+  package: string;
+  company: string;
+  createdAt: string;
+  updatedAt: string;
+  comparison: Comparison | null;
+  error: string;
 }
 
 export class SignInRequired extends Error {
@@ -270,11 +352,17 @@ export const api = {
   startDraft: (id: number, kind: DraftKind, notes: string) =>
     send<Draft>("POST", `/api/pursuits/${id}/drafts`, { kind, notes }),
 
+  offers: (pursuitId: number) => get<{ offers: Offer[]; current: boolean; currentError: string }>(`/api/pursuits/${pursuitId}/offers`),
+  addOffer: (pursuitId: number, text: string) => send<Offer>("POST", `/api/pursuits/${pursuitId}/offers`, { text }),
+  updateOffer: (id: number, pkg: string) => send<Offer>("PUT", `/api/offers/${id}`, { package: pkg }),
+  deleteOffer: (id: number) => send<{ deleted: boolean }>("DELETE", `/api/offers/${id}`),
+
   draft: (id: number) => get<Draft>(`/api/drafts/${id}`),
   draftFileUrl: (id: number) => `/api/drafts/${id}/file`,
 
-  options: (q: { q?: string; tier?: string; category?: string; minScore?: number }) => {
+  options: (q: { q?: string; tier?: string; category?: string; minScore?: number; pay?: PayFilter }) => {
     const params = new URLSearchParams();
+    if (q.pay) params.set("pay", q.pay);
     if (q.q) params.set("q", q.q);
     if (q.tier) params.set("tier", q.tier);
     if (q.category) params.set("category", q.category);

@@ -26,6 +26,7 @@ type Catalog struct {
 type Option struct {
 	ItemView
 	RankScore int
+	FitParts  FitParts
 	Priority  Priority
 	Sent      bool // already shown in an alert or digest
 }
@@ -35,7 +36,10 @@ type OptionsQuery struct {
 	Company        string // matched against the company name only
 	Tier, Category string
 	MinScore       *int // nil: the catalog's default
-	Limit          int
+	// Listed pay: the top (or bottom) of the range at least this. Either end stands in for a missing other end;
+	// postings with no pay listed never match.
+	PayTopAtLeast, PayBottomAtLeast *float64
+	Limit                           int
 }
 
 type OptionsPage struct {
@@ -77,6 +81,14 @@ func (c *Catalog) Options(ctx context.Context, q OptionsQuery) (OptionsPage, err
 		where += ` AND lower(coalesce("Category", '')) = ?`
 		args = append(args, strings.ToLower(q.Category))
 	}
+	if q.PayTopAtLeast != nil {
+		where += ` AND coalesce("CompMax", "CompMin") >= ?`
+		args = append(args, *q.PayTopAtLeast)
+	}
+	if q.PayBottomAtLeast != nil {
+		where += ` AND coalesce("CompMin", "CompMax") >= ?`
+		args = append(args, *q.PayBottomAtLeast)
+	}
 	rows, err := c.DB.QueryContext(ctx, `SELECT `+itemViewColumns+`, "DigestedAt" IS NOT NULL FROM "RadarItems" WHERE `+where, args...)
 	if err != nil {
 		return OptionsPage{}, err
@@ -114,7 +126,7 @@ func (c *Catalog) Options(ctx context.Context, q OptionsQuery) (OptionsPage, err
 		kept = kept[:q.Limit]
 	}
 	for _, i := range kept {
-		page.Options = append(page.Options, Option{ItemView: i, RankScore: ranking.RankScore(i), Priority: ranking.PriorityOf(i), Sent: sent[i.ID]})
+		page.Options = append(page.Options, Option{ItemView: i, RankScore: ranking.RankScore(i), FitParts: ranking.Parts(i), Priority: ranking.PriorityOf(i), Sent: sent[i.ID]})
 	}
 	for _, t := range ranking.Prefs.Tiers {
 		page.Tiers = append(page.Tiers, t.Name)
@@ -154,7 +166,7 @@ func (c *Catalog) Item(ctx context.Context, id int64) (ItemDetail, error) {
 	if err != nil {
 		return d, err
 	}
-	d.Option = Option{ItemView: v, RankScore: ranking.RankScore(v), Priority: ranking.PriorityOf(v), Sent: wasSent}
+	d.Option = Option{ItemView: v, RankScore: ranking.RankScore(v), FitParts: ranking.Parts(v), Priority: ranking.PriorityOf(v), Sent: wasSent}
 	return d, nil
 }
 

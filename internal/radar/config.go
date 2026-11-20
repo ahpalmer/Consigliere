@@ -43,6 +43,26 @@ type Preferences struct {
 	Categories []Category `yaml:"categories"`
 	// Company-level priority, matched on the item's company name, whatever source reported it.
 	CompanyPriority CompanyPriority `yaml:"company_priority"`
+	// How fit is put together from the resume match, location and pay.
+	Fit FitSettings `yaml:"fit"`
+}
+
+// FitSettings weigh the three parts of fit. The model scores only how well the resume matches the posting; location
+// (by tier) and pay (the listed range against what the owner makes now, from comp/current.yaml) are plain code.
+type FitSettings struct {
+	Weights FitWeights `yaml:"weights"`
+	// 0-100 per tier name. Tiers left out score by their order: the first 100, each next one 25 less, at least 25.
+	Location map[string]int `yaml:"location"`
+	// The pay score for a posting that lists no pay. Default 50.
+	UnknownPay *int `yaml:"unknown_pay"`
+}
+
+// FitWeights are relative; all zero means the defaults (resume 60, location 20, pay 20). Pay drops out when there's
+// no current package to compare with.
+type FitWeights struct {
+	Resume   int `yaml:"resume"`
+	Location int `yaml:"location"`
+	Pay      int `yaml:"pay"`
 }
 
 type KeywordSet struct {

@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/clock"
+	"github.com/ahpalmer/consigliere/internal/comp"
 	"github.com/ahpalmer/consigliere/internal/datapack"
 	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/llm"
@@ -27,7 +29,15 @@ import (
 type fakeLLM struct{}
 
 func (fakeLLM) Structured(_ context.Context, req llm.StructuredRequest) (string, error) {
-	if props, _ := req.Schema["properties"].(map[string]any); props["paragraphs"] != nil {
+	props, _ := req.Schema["properties"].(map[string]any)
+	if props["base"] != nil {
+		if strings.Contains(req.User, "no numbers") {
+			return `{"company":"","start_date":"","base":null,"bonus":null,"sign_on":null,"equity":[],"retirement":null,"health":null,"perks":[],"none":[],"notes":[]}`, nil
+		}
+		return `{"company":"Acme","start_date":"2027-01-04","base":200000,"bonus":{"target_percent":15,"amount":null},"sign_on":null,
+			"equity":[],"retirement":{"match_percent":100,"up_to_percent":4,"annual":null},"health":null,"perks":[],"none":["equity"],"notes":["25 days PTO"]}`, nil
+	}
+	if props["paragraphs"] != nil {
 		return `{"paragraphs":["I want to run Acme's fleets.","I ran 4,000 machines."],"why_company":"Fleets.","notes":["Checked."]}`, nil
 	}
 	return `{"why_company":"Acme runs the fleets I want to work on.","cover_letter":"Dear Hiring Team,\n\nI run fleets.\n\nSam"}`, nil
@@ -38,6 +48,7 @@ func (fakeLLM) Generate(_ context.Context, req llm.GenerateRequest) (string, err
 
 type fixture struct {
 	t     *testing.T
+	db    *sql.DB
 	srv   *httptest.Server
 	tasks *agent.Tasks
 	state *agent.State
@@ -79,15 +90,19 @@ Go services', 'remote', ?)`,
 	drafts := &pipeline.Drafts{Pipeline: pl, Kit: &kit.Kit{Pack: pack, LLM: fakeLLM{}, Owner: "Sam"}, Tasks: tasks, State: state}
 	catalog := &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: 50}
 	s := &Server{Token: token, Pipeline: pl, State: state, Clock: clk, Drafts: drafts, Catalog: catalog,
-		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 80, MediumMinScore: 60,
+		// The sample pack blends fit with location and pay, so the 88 remote match with no pay listed ranks lower.
+		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 75, MediumMinScore: 60,
 			MaxHigh: 10, MaxMedium: 20, PerCompany: 2, AutoPrepare: 5},
-		Feedback: &radar.Feedback{DB: db, Clock: clk},
-		Usage:    llm.NewUsageTracker(),
-		Assets:   fstest.MapFS{"index.html": {Data: []byte("<!doctype html><div id=root></div>")}, "assets/app.js": {Data: []byte("1")}},
+		Feedback:    &radar.Feedback{DB: db, Clock: clk},
+		Usage:       llm.NewUsageTracker(),
+		Offers:      &comp.Offers{DB: db, Clock: clk},
+		OfferReader: comp.Extractor{LLM: fakeLLM{}, Owner: "Sam"},
+		Pack:        pack,
+		Assets:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><div id=root></div>")}, "assets/app.js": {Data: []byte("1")}},
 	}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &fixture{t: t, srv: srv, tasks: tasks, state: state}
+	return &fixture{t: t, db: db, srv: srv, tasks: tasks, state: state}
 }
 
 // do sends a request and decodes the JSON reply into out (if non-nil), returning the status.

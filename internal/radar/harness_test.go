@@ -32,6 +32,9 @@ categories:
 tiers:
   - { name: local, locations: [raleigh], alert: instant }
   - { name: anywhere }
+# Fit is the scorer's number alone here, so these tests read plainly; ranking_test.go covers the blend.
+fit:
+  weights: { resume: 1 }
 `
 
 // harness wires the Radar pipeline like the host does, against a temp data pack and a real SQLite file with the

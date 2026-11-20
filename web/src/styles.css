@@ -1034,6 +1034,92 @@ tr.failed td {
   background: var(--bad-soft);
 }
 
+/* --- pay against pay now --- */
+
+.pay {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pay-above {
+  color: var(--good);
+}
+
+.pay-overlaps {
+  color: var(--warn);
+}
+
+.pay-below {
+  color: var(--ink-3);
+}
+
+/* --- offers --- */
+
+.offer {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+  margin-top: 1rem;
+}
+
+.offer:first-of-type {
+  border-top: 0;
+  margin-top: 0;
+  padding-top: 0;
+}
+
+.offer-head {
+  margin-bottom: 0.75rem;
+}
+
+.offer-head h3 {
+  font-family: var(--serif);
+}
+
+.row.end {
+  justify-content: flex-end;
+}
+
+.offer-verdict {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.good-text {
+  color: var(--good);
+}
+
+.offer h4 {
+  margin: 0 0 0.35rem;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-3);
+}
+
+.offer details summary {
+  cursor: pointer;
+  color: var(--ink-2);
+  margin-bottom: 0.5rem;
+}
+
+.offer details .table-wrap + .table-wrap {
+  margin-top: 0.75rem;
+}
+
+.offers-section {
+  margin-top: 1rem;
+}
+
+tr.total-row td {
+  font-weight: 650;
+  border-bottom: 0;
+}
+
+textarea.mono {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+}
+
 /* --- narrow screens --- */
 
 @media (max-width: 900px) {

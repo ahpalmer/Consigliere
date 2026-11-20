@@ -20,3 +20,17 @@ categories:
     description: Developer tooling and infrastructure work.
   - name: other-engineering
     description: Any other engineering role.
+
+# Fit (0-100) blends three parts. The model scores only how well the resume matches the role; location (by tier) and
+# pay (the listed range against what you make now, from comp/current.yaml) are scored in code. Weights are relative.
+# Jobs sort by fit, so this is what decides the order.
+fit:
+  weights: { resume: 60, location: 20, pay: 20 }
+  # 0-100 per tier. Tiers left out score by their order: 100, 75, 50, then 25.
+  location: { nearby: 100, remote: 90, elsewhere: 40 }
+  # Pay score for a job that lists no pay. Listed pay scores 0 at 80% of your base, 40 at your base, 80 at your total
+  # pay, and 100 at 15% over it.
+  unknown_pay: 50
+
+# Optional: company_priority: { high: [...], low: [...] } adds or takes 15 points for those companies wherever
+# their jobs come from, and lists high ones first.

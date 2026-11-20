@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Draft } from "../api";
-import { ErrorNote, External, Fit, Panel } from "../components";
-import { relativeDay, shortDate } from "../format";
+import { ErrorNote, External, Fit, Panel, PayDetail } from "../components";
+import { fitTitle, relativeDay, shortDate } from "../format";
 import { useAction, useLoad } from "../hooks";
 import { ItemActions } from "./Options";
 import { coverHint, coverPlaceholder, DraftRow, Research } from "./PursuitPage";
@@ -43,8 +43,7 @@ export function ItemPage() {
           </h1>
           <div className="row wrap facts">
             <span>
-              Fit <Fit fit={o.fit} />
-              {o.rankScore !== o.fit && <span className="muted"> (ranked {o.rankScore}, priority company)</span>}
+              Fit <Fit fit={o.rankScore} title={fitTitle(o)} /> <span className="muted small">{fitTitle(o).replace(/^Fit \d+: /, "")}</span>
             </span>
             {o.locations && <span>{o.locations}</span>}
             {o.comp && <span>{o.comp}</span>}
@@ -57,6 +56,11 @@ export function ItemPage() {
 
       <div className="detail-grid">
         <div className="stack">
+          {o.pay && (
+            <Panel title="Pay">
+              <PayDetail pay={o.pay} />
+            </Panel>
+          )}
           <Panel title="Why it scored this way">
             {o.summary && <p>{o.summary}</p>}
             {o.reasons.length > 0 && (

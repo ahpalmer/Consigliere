@@ -8,6 +8,7 @@ from `DataPack:Path`.
 <data-pack>/
   profile/    who the owner is (see below)
   radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll: boards, the HN thread, alert email)
+  comp/       current.yaml: your current pay package, for comparing offers (optional; see below)
   code/       repos.yaml: the repositories on the dev box, and its dev_box entry for the Code page (optional; see dev-box.md)
   db/         SQLite database (gitignored in the pack; backed up to blob storage)
 ```
@@ -21,6 +22,15 @@ from `DataPack:Path`.
 | `networks.yaml` | `/kit` | Veteran groups per company, plus general programs |
 | `connections.csv` | `/kit` | LinkedIn's Connections export, unmodified. Read locally to list people you know at a company; never sent to the model. |
 | `application.yaml` | Suggested page | Standard answers for application forms (work authorization, start date, ...), shown with copy buttons. Name, email, phone and links come from `bullets.yaml`'s contact line. |
+
+`radar/preferences.yaml`'s `fit:` section weighs the three parts of fit: the resume match (the only part the model
+scores), location by tier, and pay against what you make now. Jobs sort by fit.
+
+`comp/current.yaml` is your current pay package: base, bonus (and when it pays), sign-on and its clawback, equity
+grants (with a vesting schedule, or just a yearly amount), the retirement match and what you put in, health costs and
+perks. Every section can carry an `as_of` date; the comparison warns when a number is over a year old (stock prices: 3
+months). An offer pasted on a pursuit page is read into the same shape, kept in the database, and can be corrected as
+YAML. See the sample pack's file for every field.
 
 Scoring reads only `summary.md` and `resume.master.md` (or `about.md`), so editing stories or the bullet bank
 doesn't make every score stale.

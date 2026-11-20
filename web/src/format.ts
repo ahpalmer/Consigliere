@@ -112,3 +112,28 @@ export function tokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
+
+/** How a ranked score is made up, for the fit badge's tooltip. */
+export function fitTitle(o: { rankScore: number; fitParts: { resume: number | null; location: number; pay: number | null; payListed: boolean; fit: number } }): string {
+  const p = o.fitParts;
+  const parts = [`Resume ${p.resume ?? "–"}`, `Location ${p.location}`];
+  if (p.pay !== null) parts.push(`Pay ${p.pay}${p.payListed ? "" : " (none listed)"}`);
+  let text = `Fit ${p.fit}: ${parts.join(" · ")}`;
+  const adjustment = o.rankScore - p.fit;
+  if (adjustment !== 0) text += `, ${adjustment > 0 ? "plus" : "minus"} ${Math.abs(adjustment)} for company priority`;
+  return text;
+}
+
+/** Short dollars for badges: $172K, $236.9K, -$12K. */
+export function moneyK(n: number): string {
+  const k = Math.abs(n) / 1000;
+  const text = "$" + (Number.isInteger(Math.round(k * 10) / 10) ? Math.round(k) : k.toFixed(1)) + "K";
+  return n < 0 ? "-" + text : text;
+}
+
+/** Whole dollars: $185,000, -$12,500. With signed, positive amounts get a + (for differences). */
+export function money(n: number, signed = false): string {
+  const text = "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
+  if (n < 0) return "-" + text;
+  return signed && n > 0 ? "+" + text : text;
+}

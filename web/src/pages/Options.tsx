@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { api, type Option } from "../api";
-import { ErrorNote, External, Fit, StageBadge } from "../components";
-import { relativeDay } from "../format";
+import { api, type Option, type PayFilter } from "../api";
+import { ErrorNote, External, Fit, PayVerdict, StageBadge } from "../components";
+import { fitTitle, moneyK, relativeDay } from "../format";
 import { useAction, useLoad } from "../hooks";
 
 export function Options() {
@@ -12,13 +12,15 @@ export function Options() {
   const tier = params.get("tier") ?? "";
   const category = params.get("category") ?? "";
   const minScore = params.get("minScore");
+  const pay = (params.get("pay") ?? "") as PayFilter;
   const [search, setSearch] = useState(q);
 
-  const page = useLoad(() => api.options({ q, tier, category, minScore: minScore === null ? undefined : Number(minScore) }), [
+  const page = useLoad(() => api.options({ q, tier, category, pay, minScore: minScore === null ? undefined : Number(minScore) }), [
     q,
     tier,
     category,
     minScore,
+    pay,
   ]);
 
   // Search as you type, a beat after the last keystroke.
@@ -60,6 +62,16 @@ export function Options() {
           ))}
           <option>other</option>
         </select>
+        <select value={pay} onChange={(e) => update("pay", e.target.value)} aria-label="Pay">
+          <option value="">Any pay</option>
+          <option value="listed">Pay listed</option>
+          {data?.payNow !== null && (
+            <>
+              <option value="reach">Could beat my total{data?.payNow ? ` (${moneyK(data.payNow.total)})` : ""}</option>
+              <option value="beats">Beats my total</option>
+            </>
+          )}
+        </select>
         <label className="inline-field">
           Min score
           <input
@@ -94,7 +106,7 @@ export function OptionRow({ o, onChange }: { o: Option; onChange: () => Promise<
   return (
     <li className="option">
       {/* The ranked score, so the badges match the sort order and the "Min score" filter. */}
-      <Fit fit={o.rankScore} title={o.rankScore !== o.fit ? `Fit ${o.fit}, plus ${o.rankScore - (o.fit ?? 0)} for a priority company` : undefined} />
+      <Fit fit={o.rankScore} title={fitTitle(o)} />
       <div className="option-main">
         <Link to={`/items/${o.id}`} className="option-title">
           {o.title}
@@ -106,6 +118,7 @@ export function OptionRow({ o, onChange }: { o: Option; onChange: () => Promise<
           </b>
           {o.locations && <span>{o.locations}</span>}
           {o.comp && <span>{o.comp}</span>}
+          <PayVerdict pay={o.pay} />
           <span>{relativeDay(o.postedAt ?? o.firstSeenAt)}</span>
           {[o.tier, o.category].filter(Boolean).length > 0 && <span>{[o.tier, o.category].filter(Boolean).join(" · ")}</span>}
         </div>

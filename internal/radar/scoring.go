@@ -161,24 +161,11 @@ func describe(item ScoreInput, now time.Time) string {
 		days := int(now.Sub(*item.PostedAt).Hours() / 24)
 		age = fmt.Sprintf("%s (%d days ago)", item.PostedAt.Format("2006-01-02"), max(0, days))
 	}
-	pay := "not listed"
-	if item.CompMin != nil || item.CompMax != nil {
-		f := func(p *float64) string {
-			if p == nil {
-				return "?"
-			}
-			return thousands(*p)
-		}
-		pay = fmt.Sprintf("%s - %s (listed range, usually base pay)", f(item.CompMin), f(item.CompMax))
-	}
 	description := item.Description
 	if len(description) > maxDescriptionChars {
 		description = description[:maxDescriptionChars] + "\n[truncated]"
 	}
-	tier := item.Tier
-	if tier == "" {
-		tier = "none"
-	}
-	return fmt.Sprintf("Today: %s\nCompany: %s\nTitle: %s\nLocations: %s\nLocation tier (from the rule filter): %s\nPay: %s\nPosted: %s\n\nDescription:\n%s",
-		now.Format("2006-01-02"), item.Company, item.Title, item.Locations, tier, pay, age, description)
+	// Location and pay are left out on purpose: they're scored in code (FitSettings), not by the model.
+	return fmt.Sprintf("Today: %s\nCompany: %s\nTitle: %s\nPosted: %s\n\nDescription:\n%s",
+		now.Format("2006-01-02"), item.Company, item.Title, age, description)
 }

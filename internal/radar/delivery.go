@@ -120,6 +120,7 @@ func (d *Digest) Next(ctx context.Context) (DigestResult, error) {
 
 	shown := pending[:min(len(pending), max(d.MaxItems, 1))]
 	remaining := len(pending) - len(shown)
+	ranking.Group(shown)
 
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "Radar: %d of %d new\n", len(shown), len(pending))
