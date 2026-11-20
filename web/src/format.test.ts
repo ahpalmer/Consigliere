@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completion, eventText, fitBand, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
+import { completion, eventText, fitBand, money, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
 
 describe("relativeDay", () => {
   const now = new Date(2026, 9, 28, 9, 0); // Wed Oct 28, local
@@ -48,5 +48,15 @@ describe("labels", () => {
   });
   it("abbreviates token counts", () => {
     expect([tokens(950), tokens(4_100), tokens(2_500_000)]).toEqual(["950", "4.1K", "2.5M"]);
+  });
+});
+
+describe("money", () => {
+  it("formats whole dollars, signing differences when asked", () => {
+    expect(money(185000)).toBe("$185,000");
+    expect(money(-12500)).toBe("-$12,500");
+    expect(money(0, true)).toBe("$0");
+    expect(money(40000, true)).toBe("+$40,000");
+    expect(money(-40000, true)).toBe("-$40,000");
   });
 });

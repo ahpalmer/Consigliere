@@ -30,6 +30,7 @@ import (
 	"github.com/ahpalmer/consigliere/internal/backup"
 	"github.com/ahpalmer/consigliere/internal/channel"
 	"github.com/ahpalmer/consigliere/internal/clock"
+	"github.com/ahpalmer/consigliere/internal/comp"
 	"github.com/ahpalmer/consigliere/internal/config"
 	"github.com/ahpalmer/consigliere/internal/datapack"
 	"github.com/ahpalmer/consigliere/internal/devbox"
@@ -202,7 +203,8 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		}
 		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Suggestions: suggestions, Feedback: feedback,
 			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk,
-			Code: &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv()}}
+			Code:   &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv()},
+			Offers: &comp.Offers{DB: db, Clock: clk}, OfferReader: comp.Extractor{LLM: llmClient, Owner: cfg.Agent.OwnerName}, Pack: pack}
 	}
 
 	// Run until Ctrl+C / SIGTERM, then stop in order: polling, scheduling and the dashboard first, then background

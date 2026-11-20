@@ -112,3 +112,10 @@ export function tokens(n: number): string {
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
   return String(n);
 }
+
+/** Whole dollars: $185,000, -$12,500. With signed, positive amounts get a + (for differences). */
+export function money(n: number, signed = false): string {
+  const text = "$" + Math.abs(Math.round(n)).toLocaleString("en-US");
+  if (n < 0) return "-" + text;
+  return signed && n > 0 ? "+" + text : text;
+}

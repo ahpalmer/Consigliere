@@ -63,6 +63,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 		return s.Pipeline.AddNote(r.Context(), id, strings.TrimSpace(body.Text))
 	}))
 	mux.HandleFunc("POST /api/pursuits/{id}/drafts", s.startDraft)
+	s.offerRoutes(mux)
 
 	mux.HandleFunc("GET /api/drafts/{id}", s.getDraft)
 	mux.HandleFunc("GET /api/drafts/{id}/file", s.draftFile)

@@ -204,6 +204,56 @@ export interface CodeStatus {
   repos: CodeRepo[];
 }
 
+/** One row of a package in an offer comparison: whole dollars per year, and the total. */
+export interface CompLine {
+  label: string;
+  amounts: number[];
+  total: number;
+  note: string;
+}
+
+export interface CompColumn {
+  lines: CompLine[];
+  totals: number[];
+  total: number;
+  /** Private equity: paper value, never counted in totals. */
+  private: CompLine[];
+}
+
+export interface Forfeit {
+  label: string;
+  amount: number;
+  note: string;
+  private: boolean;
+}
+
+export interface Comparison {
+  start: string;
+  years: number;
+  current: CompColumn;
+  incoming: CompColumn;
+  difference: number[];
+  differenceTotal: number;
+  forfeited: Forfeit[];
+  questions: string[];
+  assumptions: string[];
+  warnings: string[];
+  notes: string[];
+}
+
+/** An offer pasted in on a pursuit: the text, the package read from it (YAML), and how it compares. */
+export interface Offer {
+  id: number;
+  pursuitId: number;
+  text: string;
+  package: string;
+  company: string;
+  createdAt: string;
+  updatedAt: string;
+  comparison: Comparison | null;
+  error: string;
+}
+
 export class SignInRequired extends Error {
   constructor() {
     super("Sign in required");
@@ -269,6 +319,11 @@ export const api = {
   addNote: (id: number, text: string) => send<Pursuit>("POST", `/api/pursuits/${id}/notes`, { text }),
   startDraft: (id: number, kind: DraftKind, notes: string) =>
     send<Draft>("POST", `/api/pursuits/${id}/drafts`, { kind, notes }),
+
+  offers: (pursuitId: number) => get<{ offers: Offer[]; current: boolean; currentError: string }>(`/api/pursuits/${pursuitId}/offers`),
+  addOffer: (pursuitId: number, text: string) => send<Offer>("POST", `/api/pursuits/${pursuitId}/offers`, { text }),
+  updateOffer: (id: number, pkg: string) => send<Offer>("PUT", `/api/offers/${id}`, { package: pkg }),
+  deleteOffer: (id: number) => send<{ deleted: boolean }>("DELETE", `/api/offers/${id}`),
 
   draft: (id: number) => get<Draft>(`/api/drafts/${id}`),
   draftFileUrl: (id: number) => `/api/drafts/${id}/file`,

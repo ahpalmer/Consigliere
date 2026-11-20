@@ -20,7 +20,7 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M6** | Pipeline: Options → Active → Waiting → Completed, per-item checklist, drafting kit, morning briefing | Done |
 | **M7** | Updates from email move items through the pipeline (confirmations, scheduling, outcomes) | Done |
 | **M8** | React + TypeScript dashboard, reachable only over the tailnet | Done |
-| **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code | Planned |
+| **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code (branch `feature/m9-package-comparison`) | Built |
 | **M11** | A high-priority source with no public feed: alert emails plus pasted details, re-score on demand, a top-4 view | In progress |
 | **M12** | One small VM per bot: systemd, secrets from Key Vault into memory, Tailscale, per-branch deploys | Done |
 | **M13** | Dashboard sections, starting with **Dates**: idea bank, planning, reminders, ratings (branch `feature/m13-dates`) | Not started |
@@ -36,7 +36,10 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 **M9: Package comparison.** The current package goes in the data pack (base pay, bonus, stock vests, retirement match,
 health, perks), each value dated. An incoming package is pasted in; a cheap model extracts it. All math is plain,
 unit-tested code: totals for years 1-4, what's forfeited by leaving, and questions for anything not stated. Private
-equity is shown apart from guaranteed pay, with a warning.
+equity is shown apart from guaranteed pay, with a warning. **Built** (`internal/comp`, the pursuit page's Offers panel):
+the retirement match is worked out on what the owner actually puts in, on both sides, and stock can be a steady yearly
+amount instead of grants. **Next:** fill in the real `comp/current.yaml`, try it on a real offer, then maybe `/compare`
+in Telegram.
 
 **M11: A source with no public feed.** Its site's terms forbid automated access, so the feed is alert emails (its own,
 or from a third-party site that lists its items), forwarded to the dedicated mailbox. **Done:** those alerts dedupe by

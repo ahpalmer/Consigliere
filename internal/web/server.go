@@ -16,6 +16,8 @@ import (
 
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/clock"
+	"github.com/ahpalmer/consigliere/internal/comp"
+	"github.com/ahpalmer/consigliere/internal/datapack"
 	"github.com/ahpalmer/consigliere/internal/devbox"
 	"github.com/ahpalmer/consigliere/internal/llm"
 	"github.com/ahpalmer/consigliere/internal/pipeline"
@@ -39,6 +41,12 @@ type Server struct {
 	Clock       clock.Clock
 	// The Code page, when the data pack sets up a dev box.
 	Code *devbox.Box
+	// Offers pasted in on pursuits, read by OfferReader, compared with the current package in Pack.
+	Offers      *comp.Offers
+	OfferReader interface {
+		Extract(ctx context.Context, text string, today time.Time) (*comp.Package, error)
+	}
+	Pack *datapack.Pack
 	// Overrides the embedded app (tests).
 	Assets fs.FS
 }
