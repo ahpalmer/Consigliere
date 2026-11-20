@@ -26,6 +26,9 @@ type WatchedSource struct {
 	Board string `yaml:"board"`
 	// low | normal | high. Nudges ranking; never hides items.
 	Priority string `yaml:"priority"`
+	// email only: more sender domains whose mail is read like a job site's, such as a company's own career site
+	// (apple.com) that sends job alerts.
+	Senders []string `yaml:"senders"`
 }
 
 // Preferences is radar/preferences.yaml in the data pack.

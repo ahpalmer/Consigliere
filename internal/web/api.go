@@ -72,6 +72,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/options", s.options)
 	mux.HandleFunc("GET /api/items/{id}", s.getItem)
 	mux.HandleFunc("PUT /api/items/{id}/feedback", s.feedback)
+	mux.HandleFunc("POST /api/items/{id}/posting", s.pastePosting)
 	mux.HandleFunc("POST /api/items/{id}/cover", s.coverLetter)
 
 	mux.HandleFunc("GET /api/suggestions", s.suggestions)
@@ -724,8 +725,39 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		d.Text = "" // GET /api/drafts/{id} has the text
 		dr = append(dr, toDraftJSON(d))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id], s.payNow()), "description": item.Description, "drafts": dr,
-		"research": research(item.Company)})
+	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id], s.payNow()), "description": item.Description,
+		"pastedAt": item.PastedAt, "drafts": dr, "research": research(item.Company)})
+}
+
+// pastePosting takes the full posting the owner pasted (alert emails carry only a snippet) and re-scores the item
+// with it, waiting for the score so the page shows it at once.
+func (s *Server) pastePosting(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	var body struct{ Text string }
+	if !readJSON(w, r, &body) {
+		return
+	}
+	switch text := strings.TrimSpace(body.Text); {
+	case text == "":
+		writeError(w, http.StatusBadRequest, "paste the posting")
+	case len(text) > radar.MaxPastedChars:
+		writeError(w, http.StatusBadRequest, "that's too long for one posting")
+	default:
+		switch err := s.Scoring.Paste(r.Context(), id, text); {
+		case errors.Is(err, radar.ErrNotFound), errors.Is(err, radar.ErrPaused):
+			actionError(w, err)
+			return
+		case err != nil:
+			// The text is saved either way; the next scoring run picks the item up.
+			slog.Warn("couldn't re-score a pasted posting", "item", id, "err", err)
+			writeError(w, http.StatusBadGateway, "Saved the posting, but couldn't score it just now; it'll be scored on the next run.")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]bool{"rescored": true})
+	}
 }
 
 // coverLetter starts a cover letter for an item; it joins the item's pursuit when there is one.
@@ -894,7 +926,7 @@ func actionError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, pipeline.ErrNotFound), errors.Is(err, radar.ErrNotFound):
 		writeError(w, http.StatusNotFound, "not found")
-	case errors.Is(err, pipeline.ErrPaused):
+	case errors.Is(err, pipeline.ErrPaused), errors.Is(err, radar.ErrPaused):
 		writeError(w, http.StatusConflict, "Paused. Resume first.")
 	case errors.As(err, &bad):
 		writeError(w, http.StatusBadRequest, bad.Error())

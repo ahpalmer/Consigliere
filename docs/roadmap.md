@@ -21,7 +21,7 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M7** | Updates from email move items through the pipeline (confirmations, scheduling, outcomes) | Done |
 | **M8** | React + TypeScript dashboard, reachable only over the tailnet | Done |
 | **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code (branch `feature/m9-package-comparison`) | Built |
-| **M11** | A high-priority source with no public feed: alert emails plus pasted details, re-score on demand, a top-4 view | In progress |
+| **M11** | A high-priority source with no public feed: alert emails (job sites and company career sites) plus pasted details, re-score on demand (branch `feature/m11`) | Built |
 | **M12** | One small VM per bot: systemd, secrets from Key Vault into memory, Tailscale, per-branch deploys | Done |
 | **M13** | Dashboard sections, starting with **Dates**: idea bank, planning, reminders, ratings (branch `feature/m13-dates`) | Not started |
 | **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Planned |
@@ -48,8 +48,10 @@ scores only the resume match, and code blends in location (by tier) and pay (aga
 **M11: A source with no public feed.** Its site's terms forbid automated access, so the feed is alert emails (its own,
 or from a third-party site that lists its items), forwarded to the dedicated mailbox. **Done:** those alerts dedupe by
 the third-party site's own id, and every item and pursuit page links to that site's company research page (a link the
-owner opens; nothing is fetched). **Next:** for the shortlist, the owner pastes the full text on the item page to
-re-score it. A "top picks" view shows the best 4 from that source, plus a weekly Telegram line.
+owner opens; nothing is fetched). **Built:** a company's own career-site alerts (apple.com) are read once its domain is
+listed under `senders:` on the watchlist's email entry. On the item page the owner pastes the full posting; it replaces
+the alert's snippet, takes the pay range from it, and the job is re-scored at once (a later copy of the alert never
+overwrites it). The "top picks" view was dropped: Options already sorts by fit. **Next:** merge, then paste a few.
 
 **M13: Dates.** A section switcher in the dashboard (each bot turns sections on in config). Dates has these pages:
 Upcoming, Ideas (add, generate, favorite), Generate (constraints in, 5 ideas out, using past ratings) and History.

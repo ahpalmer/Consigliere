@@ -206,6 +206,7 @@ type fakeScorer struct {
 	mu      sync.Mutex
 	byTitle map[string]*ScoreResult
 	calls   []string
+	texts   []string // the description each call saw
 	version string
 }
 
@@ -217,6 +218,7 @@ func (f *fakeScorer) Score(_ context.Context, item ScoreInput, _ ScoringContext)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.calls = append(f.calls, item.Title)
+	f.texts = append(f.texts, item.Description)
 	if r, ok := f.byTitle[item.Title]; ok {
 		if r == nil {
 			return nil, nil

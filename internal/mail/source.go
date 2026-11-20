@@ -22,8 +22,9 @@ import (
 // Each new message from an allowed sender is read once: job listings become items (only those whose URL appears in
 // the email), and an update about one of the owner's applications goes to Updates.
 //
-// Allowed senders: job sites (AllowedDomains), application and scheduling systems (UpdateDomains), and companies
-// the owner is pursuing (a sender domain part equal to the company's name, e.g. careers.google.com for Google).
+// Allowed senders: job sites (AllowedDomains, plus the watchlist entry's senders, e.g. a company's own career site
+// such as apple.com), application and scheduling systems (UpdateDomains), and companies the owner is pursuing (a
+// sender domain part equal to the company's name, e.g. careers.google.com for Google).
 // BlockedSenders (account-security mail) are never read, whatever the domain. A message skipped as "sender not
 // allowed" is checked again on later scans, so it's read once its sender becomes allowed (a new pursuit).
 type Source struct {
@@ -57,25 +58,26 @@ const noteNotAllowed = "sender not allowed"
 func (s *Source) Kind() string       { return "email" }
 func (s *Source) IsAggregator() bool { return true }
 
-func (s *Source) Fetch(ctx context.Context, _ radar.WatchedSource) ([]radar.FetchedItem, error) {
-	items, _, err := s.scan(ctx, s.Query, s.MaxMessages, false)
+func (s *Source) Fetch(ctx context.Context, watched radar.WatchedSource) ([]radar.FetchedItem, error) {
+	items, _, err := s.scan(ctx, s.Query, s.MaxMessages, watched.Senders, false)
 	return items, err
 }
 
 // Backfill reads older mail once (e.g. "newer_than:180d") for application updates only: listings that old are
 // stale. Updates are recorded without alerts. Returns the handler's notes, for one summary message.
 func (s *Source) Backfill(ctx context.Context, query string, max int) ([]string, error) {
-	_, notes, err := s.scan(ctx, query, max, true)
+	_, notes, err := s.scan(ctx, query, max, nil, true)
 	return notes, err
 }
 
-func (s *Source) scan(ctx context.Context, query string, max int, backfill bool) ([]radar.FetchedItem, []string, error) {
+func (s *Source) scan(ctx context.Context, query string, max int, senders []string, backfill bool) ([]radar.FetchedItem, []string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ids, err := s.Mailbox.ListMessageIDs(ctx, query, max)
 	if err != nil || len(ids) == 0 {
 		return nil, nil, err
 	}
+	sites := append(slices.Clone(s.AllowedDomains), senders...)
 	var companies []string
 	if s.Companies != nil {
 		if companies, err = s.Companies(ctx); err != nil {
@@ -104,7 +106,7 @@ func (s *Source) scan(ctx context.Context, query string, max int, backfill bool)
 	for _, id := range ids {
 		// Skipped mail is looked at again once its sender is allowed, and so is a forward recorded under the owner's
 		// address (before ForwardedBy listed it).
-		if p, done := processed[id]; done && (p.note != noteNotAllowed || !s.allowed(p.from, companies) && !s.forwarder(p.from)) {
+		if p, done := processed[id]; done && (p.note != noteNotAllowed || !s.allowed(p.from, sites, companies) && !s.forwarder(p.from)) {
 			continue
 		}
 		msg, err := s.Mailbox.Get(ctx, id)
@@ -124,7 +126,7 @@ func (s *Source) scan(ctx context.Context, query string, max int, backfill bool)
 		switch {
 		case msg.Own:
 			note = "consigliere's own message"
-		case !s.allowed(msg.From, companies):
+		case !s.allowed(msg.From, sites, companies):
 			note = noteNotAllowed
 			slog.Info("skipping mail from a sender that isn't allowed", "from", msg.From)
 		default:
@@ -165,14 +167,14 @@ func receivedAt(m Message) time.Time {
 
 // allowed: not a blocked (account-security) sender, and from a job site, an application system, or a company
 // being pursued.
-func (s *Source) allowed(from string, companies []string) bool {
+func (s *Source) allowed(from string, sites, companies []string) bool {
 	address := strings.ToLower(senderAddressOf(from))
 	for _, b := range s.BlockedSenders {
 		if b = strings.ToLower(strings.TrimSpace(b)); b != "" && strings.Contains(address, b) {
 			return false
 		}
 	}
-	return AllowedSender(from, s.AllowedDomains) || AllowedSender(from, s.UpdateDomains) || FromCompany(from, companies)
+	return AllowedSender(from, sites) || AllowedSender(from, s.UpdateDomains) || FromCompany(from, companies)
 }
 
 // FromCompany reports whether the sender's domain has a part equal to one of the companies' names with spaces and
