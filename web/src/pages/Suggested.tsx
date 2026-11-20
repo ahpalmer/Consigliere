@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ApplicantField, type Suggestion } from "../api";
 import { CopyButton, ErrorNote, External, Fit, Panel, PayVerdict } from "../components";
-import { relativeDay } from "../format";
+import { fitTitle, relativeDay } from "../format";
 import { useAction, useLoad } from "../hooks";
 
 export function Suggested() {
@@ -64,7 +64,7 @@ export function Suggested() {
 function Summary({ s }: { s: Suggestion }) {
   return (
     <>
-      <Fit fit={s.rankScore} title={s.rankScore !== s.fit ? `Fit ${s.fit}, plus ${s.rankScore - (s.fit ?? 0)} for a priority company` : undefined} />
+      <Fit fit={s.rankScore} title={fitTitle(s)} />
       <div className="option-main">
         <Link to={`/items/${s.id}`} className="option-title">
           {s.title}

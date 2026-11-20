@@ -90,7 +90,8 @@ Go services', 'remote', ?)`,
 	drafts := &pipeline.Drafts{Pipeline: pl, Kit: &kit.Kit{Pack: pack, LLM: fakeLLM{}, Owner: "Sam"}, Tasks: tasks, State: state}
 	catalog := &radar.Catalog{DB: db, Ranking: ranking, Config: radarCfg, Clock: clk, MinScore: 50}
 	s := &Server{Token: token, Pipeline: pl, State: state, Clock: clk, Drafts: drafts, Catalog: catalog,
-		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 80, MediumMinScore: 60,
+		// The sample pack blends fit with location and pay, so the 88 remote match with no pay listed ranks lower.
+		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 75, MediumMinScore: 60,
 			MaxHigh: 10, MaxMedium: 20, PerCompany: 2, AutoPrepare: 5},
 		Feedback:    &radar.Feedback{DB: db, Clock: clk},
 		Usage:       llm.NewUsageTracker(),

@@ -26,6 +26,7 @@ type Catalog struct {
 type Option struct {
 	ItemView
 	RankScore int
+	FitParts  FitParts
 	Priority  Priority
 	Sent      bool // already shown in an alert or digest
 }
@@ -125,7 +126,7 @@ func (c *Catalog) Options(ctx context.Context, q OptionsQuery) (OptionsPage, err
 		kept = kept[:q.Limit]
 	}
 	for _, i := range kept {
-		page.Options = append(page.Options, Option{ItemView: i, RankScore: ranking.RankScore(i), Priority: ranking.PriorityOf(i), Sent: sent[i.ID]})
+		page.Options = append(page.Options, Option{ItemView: i, RankScore: ranking.RankScore(i), FitParts: ranking.Parts(i), Priority: ranking.PriorityOf(i), Sent: sent[i.ID]})
 	}
 	for _, t := range ranking.Prefs.Tiers {
 		page.Tiers = append(page.Tiers, t.Name)
@@ -165,7 +166,7 @@ func (c *Catalog) Item(ctx context.Context, id int64) (ItemDetail, error) {
 	if err != nil {
 		return d, err
 	}
-	d.Option = Option{ItemView: v, RankScore: ranking.RankScore(v), Priority: ranking.PriorityOf(v), Sent: wasSent}
+	d.Option = Option{ItemView: v, RankScore: ranking.RankScore(v), FitParts: ranking.Parts(v), Priority: ranking.PriorityOf(v), Sent: wasSent}
 	return d, nil
 }
 

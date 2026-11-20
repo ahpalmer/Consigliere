@@ -134,6 +134,19 @@ export interface Option {
   pursuit: { id: number; ref: string; stage: Stage } | null;
   /** The listed pay against what you make now; null when none is listed or there's no current package. */
   pay: PostingPay | null;
+  /** How fit is made up. rankScore is fitParts.fit plus any priority-company adjustment. */
+  fitParts: FitParts;
+}
+
+export interface FitParts {
+  /** The model's resume match; null until scored. */
+  resume: number | null;
+  location: number;
+  /** Null when there's no current package to compare pay with. */
+  pay: number | null;
+  /** False when the posting lists no pay and pay is the stand-in score. */
+  payListed: boolean;
+  fit: number;
 }
 
 /** What you make now: base, and total yearly pay (bonus, match, stock, health, perks). */

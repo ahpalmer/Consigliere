@@ -372,3 +372,27 @@ func TestYardstick(t *testing.T) {
 		t.Error("no range listed should be nil")
 	}
 }
+
+func TestPayScore(t *testing.T) {
+	y := Yardstick{Base: 100_000, Total: 150_000}
+	f := func(v float64) *float64 { return &v }
+	for _, tc := range []struct {
+		min, max *float64
+		want     int
+	}{
+		{f(50_000), f(70_000), 0},
+		{f(80_000), f(80_000), 0},
+		{f(90_000), f(110_000), 40},  // midpoint at base
+		{f(125_000), f(125_000), 60}, // halfway from base to total
+		{nil, f(150_000), 80},
+		{f(160_000), f(185_000), 100}, // midpoint 172.5K = 15% over total
+		{f(300_000), nil, 100},
+	} {
+		if got, ok := y.PayScore(tc.min, tc.max); !ok || got != tc.want {
+			t.Errorf("%v-%v: %d, want %d", tc.min, tc.max, got, tc.want)
+		}
+	}
+	if _, ok := y.PayScore(nil, nil); ok {
+		t.Error("nothing listed should not be ok")
+	}
+}

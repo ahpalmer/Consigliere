@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { completion, eventText, fitBand, money, moneyK, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
+import { completion, eventText, fitBand, fitTitle, money, moneyK, nextWorkdayMorning, relativeDay, toLocalInput, tokens } from "./format";
 
 describe("relativeDay", () => {
   const now = new Date(2026, 9, 28, 9, 0); // Wed Oct 28, local
@@ -67,5 +67,13 @@ describe("moneyK", () => {
     expect(moneyK(236895)).toBe("$236.9K");
     expect(moneyK(-12000)).toBe("-$12K");
     expect(moneyK(400)).toBe("$0.4K");
+  });
+});
+
+describe("fitTitle", () => {
+  it("spells out the parts of fit, and any priority adjustment", () => {
+    const parts = { resume: 88, location: 75, pay: 50, payListed: false, fit: 78 };
+    expect(fitTitle({ rankScore: 78, fitParts: parts })).toBe("Fit 78: Resume 88 · Location 75 · Pay 50 (none listed)");
+    expect(fitTitle({ rankScore: 93, fitParts: { ...parts, pay: null } })).toBe("Fit 78: Resume 88 · Location 75, plus 15 for company priority");
   });
 });

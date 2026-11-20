@@ -1,6 +1,9 @@
 package comp
 
-import "time"
+import (
+	"math"
+	"time"
+)
 
 // Yardstick is what the owner makes now, for a quick read on job postings: base pay, and total yearly pay (base,
 // bonus, retirement match, stock vesting this year, health and perks; no one-offs, no private equity). Postings
@@ -59,4 +62,31 @@ func (y Yardstick) Posting(min, max *float64) *PostingPay {
 		p.Verdict = PayBelow
 	}
 	return p
+}
+
+// PayScore rates a posting's listed pay 0-100 against pay now, from the middle of the range: 0 at 80% of base
+// and below, 40 at base, 80 at total pay, 100 at 15% over total and above, straight lines between. ok=false when
+// nothing is listed.
+func (y Yardstick) PayScore(lo, hi *float64) (score int, ok bool) {
+	if lo == nil && hi == nil {
+		return 0, false
+	}
+	if lo == nil {
+		lo = hi
+	}
+	if hi == nil {
+		hi = lo
+	}
+	mid := (*lo + *hi) / 2
+	base, total := float64(y.Base), float64(max(y.Total, y.Base+1))
+	points := [][2]float64{{0.8 * base, 0}, {base, 40}, {total, 80}, {1.15 * total, 100}}
+	if mid <= points[0][0] {
+		return 0, true
+	}
+	for i := 1; i < len(points); i++ {
+		if a, b := points[i-1], points[i]; mid <= b[0] {
+			return int(math.Round(a[1] + (mid-a[0])/(b[0]-a[0])*(b[1]-a[1]))), true
+		}
+	}
+	return 100, true
 }

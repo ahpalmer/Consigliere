@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api, type Option, type PayFilter } from "../api";
 import { ErrorNote, External, Fit, PayVerdict, StageBadge } from "../components";
-import { moneyK, relativeDay } from "../format";
+import { fitTitle, moneyK, relativeDay } from "../format";
 import { useAction, useLoad } from "../hooks";
 
 export function Options() {
@@ -106,7 +106,7 @@ export function OptionRow({ o, onChange }: { o: Option; onChange: () => Promise<
   return (
     <li className="option">
       {/* The ranked score, so the badges match the sort order and the "Min score" filter. */}
-      <Fit fit={o.rankScore} title={o.rankScore !== o.fit ? `Fit ${o.fit}, plus ${o.rankScore - (o.fit ?? 0)} for a priority company` : undefined} />
+      <Fit fit={o.rankScore} title={fitTitle(o)} />
       <div className="option-main">
         <Link to={`/items/${o.id}`} className="option-title">
           {o.title}

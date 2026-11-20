@@ -191,6 +191,8 @@ type optionJSON struct {
 	Pursuit     *pursuitRefJSON `json:"pursuit"`
 	// The listed pay against what the owner makes now; null when no pay is listed or there's no current package.
 	Pay *comp.PostingPay `json:"pay"`
+	// How fit is made up: the resume match, location and pay.
+	FitParts radar.FitParts `json:"fitParts"`
 }
 
 func toOptionJSON(o radar.Option, p *pipeline.Pursuit, now *comp.Yardstick) optionJSON {
@@ -204,6 +206,7 @@ func toOptionJSON(o radar.Option, p *pipeline.Pursuit, now *comp.Yardstick) opti
 	if now != nil {
 		out.Pay = now.Posting(o.CompMin, o.CompMax)
 	}
+	out.FitParts = o.FitParts
 	return out
 }
 
