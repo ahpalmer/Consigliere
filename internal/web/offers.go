@@ -49,6 +49,16 @@ func (s *Server) currentPackage() (*comp.Package, string) {
 	return p, ""
 }
 
+// payNow is what the owner makes now, to hold job postings against; nil without a usable current package.
+func (s *Server) payNow() *comp.Yardstick {
+	current, _ := s.currentPackage()
+	if current == nil {
+		return nil
+	}
+	y := comp.NowFrom(current, s.Clock.Now().In(s.Pipeline.Location))
+	return &y
+}
+
 func (s *Server) offerJSON(o *comp.Offer, current *comp.Package, currentError string) offerJSON {
 	out := offerJSON{ID: o.ID, PursuitID: o.PursuitID, Text: o.Text, Package: o.Package, CreatedAt: o.CreatedAt, UpdatedAt: o.UpdatedAt}
 	incoming, err := comp.Parse(o.Package)

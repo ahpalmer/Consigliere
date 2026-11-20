@@ -342,3 +342,33 @@ func TestMoney(t *testing.T) {
 		}
 	}
 }
+
+func TestYardstick(t *testing.T) {
+	// Base 180,000 + bonus 18,000 + match 5,400 - health 2,400 + this year's stock 50,000; the retirement balance
+	// vesting in June is a one-off and isn't yearly pay.
+	y := NowFrom(currentPackage(), date("2027-01-04"))
+	if y != (Yardstick{Base: 180_000, Total: 251_000}) {
+		t.Fatalf("yardstick = %+v", y)
+	}
+	f := func(v float64) *float64 { return &v }
+	for _, tc := range []struct {
+		min, max *float64
+		verdict  string
+	}{
+		{f(260_000), f(300_000), PayAbove},
+		{f(200_000), f(260_000), PayOverlaps},
+		{f(200_000), f(240_000), PayBelow},
+		{nil, f(251_000), PayAbove},
+	} {
+		if got := y.Posting(tc.min, tc.max); got.Verdict != tc.verdict {
+			t.Errorf("%v-%v: %s, want %s", tc.min, tc.max, got.Verdict, tc.verdict)
+		}
+	}
+	p := y.Posting(f(200_000), f(240_000))
+	if p.VsBase != [2]int64{20_000, 60_000} || p.VsTotal != [2]int64{-51_000, -11_000} {
+		t.Errorf("gaps = %+v", p)
+	}
+	if y.Posting(nil, nil) != nil {
+		t.Error("no range listed should be nil")
+	}
+}

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { api, type ApplicantField, type Suggestion } from "../api";
-import { CopyButton, ErrorNote, External, Fit, Panel } from "../components";
+import { CopyButton, ErrorNote, External, Fit, Panel, PayVerdict } from "../components";
 import { relativeDay } from "../format";
 import { useAction, useLoad } from "../hooks";
 
@@ -76,6 +76,7 @@ function Summary({ s }: { s: Suggestion }) {
           </b>
           {s.locations && <span>{s.locations}</span>}
           {s.comp && <span>{s.comp}</span>}
+          <PayVerdict pay={s.pay} />
           <span>{relativeDay(s.postedAt ?? s.firstSeenAt)}</span>
         </div>
         {s.summary && <p className="option-summary">{s.summary}</p>}

@@ -1034,6 +1034,25 @@ tr.failed td {
   background: var(--bad-soft);
 }
 
+/* --- pay against pay now --- */
+
+.pay {
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pay-above {
+  color: var(--good);
+}
+
+.pay-overlaps {
+  color: var(--warn);
+}
+
+.pay-below {
+  color: var(--ink-3);
+}
+
 /* --- offers --- */
 
 .offer {

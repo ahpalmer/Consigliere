@@ -113,6 +113,13 @@ export function tokens(n: number): string {
   return String(n);
 }
 
+/** Short dollars for badges: $172K, $236.9K, -$12K. */
+export function moneyK(n: number): string {
+  const k = Math.abs(n) / 1000;
+  const text = "$" + (Number.isInteger(Math.round(k * 10) / 10) ? Math.round(k) : k.toFixed(1)) + "K";
+  return n < 0 ? "-" + text : text;
+}
+
 /** Whole dollars: $185,000, -$12,500. With signed, positive amounts get a + (for differences). */
 export function money(n: number, signed = false): string {
   const text = "$" + Math.abs(Math.round(n)).toLocaleString("en-US");

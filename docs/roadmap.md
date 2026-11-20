@@ -38,7 +38,8 @@ health, perks), each value dated. An incoming package is pasted in; a cheap mode
 unit-tested code: totals for years 1-4, what's forfeited by leaving, and questions for anything not stated. Private
 equity is shown apart from guaranteed pay, with a warning. **Built** (`internal/comp`, the pursuit page's Offers panel):
 the retirement match is worked out on what the owner actually puts in, on both sides, and stock can be a steady yearly
-amount instead of grants. **Next:** fill in the real `comp/current.yaml`, try it on a real offer, then maybe `/compare`
+amount instead of grants. Every posting that lists pay (most do, under pay-transparency laws) shows it against total
+pay now on Options, Suggested and the posting page, and Options filters on it. **Next:** fill in the real `comp/current.yaml`, try it on a real offer, then maybe `/compare`
 in Telegram.
 
 **M11: A source with no public feed.** Its site's terms forbid automated access, so the feed is alert emails (its own,

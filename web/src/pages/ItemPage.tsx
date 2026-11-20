@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api, type Draft } from "../api";
-import { ErrorNote, External, Fit, Panel } from "../components";
+import { ErrorNote, External, Fit, Panel, PayDetail } from "../components";
 import { relativeDay, shortDate } from "../format";
 import { useAction, useLoad } from "../hooks";
 import { ItemActions } from "./Options";
@@ -57,6 +57,11 @@ export function ItemPage() {
 
       <div className="detail-grid">
         <div className="stack">
+          {o.pay && (
+            <Panel title="Pay">
+              <PayDetail pay={o.pay} />
+            </Panel>
+          )}
           <Panel title="Why it scored this way">
             {o.summary && <p>{o.summary}</p>}
             {o.reasons.length > 0 && (

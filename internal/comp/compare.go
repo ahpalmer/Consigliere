@@ -23,6 +23,8 @@ type Line struct {
 	Amounts []int64 `json:"amounts"`
 	Total   int64   `json:"total"`
 	Note    string  `json:"note"`
+	// A one-time amount (a sign-on, a balance vesting), not part of yearly pay.
+	OneOff bool `json:"oneOff"`
 }
 
 // Column is one package over the comparison's years. Private equity is kept apart from Lines and never counted in
@@ -401,9 +403,9 @@ type builder struct {
 }
 
 type rawLine struct {
-	label, note string
-	amounts     [Years]float64
-	private     bool
+	label, note     string
+	amounts         [Years]float64
+	private, oneOff bool
 }
 
 func newBuilder(start time.Time) *builder { return &builder{start: start} }
@@ -422,13 +424,15 @@ func (b *builder) yearly(label string, amount float64, note string) {
 }
 
 func (b *builder) once(label string, year int, amount float64, note string) {
-	b.add(label, note).amounts[year] = amount
+	l := b.add(label, note)
+	l.amounts[year], l.oneOff = amount, true
 }
 
 // at adds amount in the year that holds the date, if it's inside the window.
 func (b *builder) at(label string, when time.Time, amount float64, note string) {
 	if i := b.year(when); i >= 0 {
-		b.add(label, note).amounts[i] = amount
+		l := b.add(label, note)
+		l.amounts[i], l.oneOff = amount, true
 	}
 }
 
@@ -472,7 +476,7 @@ func (b *builder) annualGrant(g Grant) {
 func (b *builder) column() Column {
 	col := Column{Lines: []Line{}, Totals: make([]int64, Years), Private: []Line{}}
 	for _, raw := range b.lines {
-		l := Line{Label: raw.label, Note: raw.note, Amounts: make([]int64, Years)}
+		l := Line{Label: raw.label, Note: raw.note, Amounts: make([]int64, Years), OneOff: raw.oneOff}
 		for i, a := range raw.amounts {
 			l.Amounts[i] = round(a)
 			l.Total += l.Amounts[i]

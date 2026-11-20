@@ -35,7 +35,10 @@ type OptionsQuery struct {
 	Company        string // matched against the company name only
 	Tier, Category string
 	MinScore       *int // nil: the catalog's default
-	Limit          int
+	// Listed pay: the top (or bottom) of the range at least this. Either end stands in for a missing other end;
+	// postings with no pay listed never match.
+	PayTopAtLeast, PayBottomAtLeast *float64
+	Limit                           int
 }
 
 type OptionsPage struct {
@@ -76,6 +79,14 @@ func (c *Catalog) Options(ctx context.Context, q OptionsQuery) (OptionsPage, err
 	if q.Category != "" {
 		where += ` AND lower(coalesce("Category", '')) = ?`
 		args = append(args, strings.ToLower(q.Category))
+	}
+	if q.PayTopAtLeast != nil {
+		where += ` AND coalesce("CompMax", "CompMin") >= ?`
+		args = append(args, *q.PayTopAtLeast)
+	}
+	if q.PayBottomAtLeast != nil {
+		where += ` AND coalesce("CompMin", "CompMax") >= ?`
+		args = append(args, *q.PayBottomAtLeast)
 	}
 	rows, err := c.DB.QueryContext(ctx, `SELECT `+itemViewColumns+`, "DigestedAt" IS NOT NULL FROM "RadarItems" WHERE `+where, args...)
 	if err != nil {

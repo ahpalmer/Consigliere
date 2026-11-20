@@ -2,6 +2,7 @@ package web
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -47,6 +48,7 @@ func (fakeLLM) Generate(_ context.Context, req llm.GenerateRequest) (string, err
 
 type fixture struct {
 	t     *testing.T
+	db    *sql.DB
 	srv   *httptest.Server
 	tasks *agent.Tasks
 	state *agent.State
@@ -99,7 +101,7 @@ Go services', 'remote', ?)`,
 	}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
-	return &fixture{t: t, srv: srv, tasks: tasks, state: state}
+	return &fixture{t: t, db: db, srv: srv, tasks: tasks, state: state}
 }
 
 // do sends a request and decodes the JSON reply into out (if non-nil), returning the status.

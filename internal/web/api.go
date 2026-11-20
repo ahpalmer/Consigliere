@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahpalmer/consigliere/internal/comp"
 	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/pipeline"
 	"github.com/ahpalmer/consigliere/internal/radar"
@@ -188,15 +189,20 @@ type optionJSON struct {
 	Feedback    *int            `json:"feedback"`
 	Sent        bool            `json:"sent"`
 	Pursuit     *pursuitRefJSON `json:"pursuit"`
+	// The listed pay against what the owner makes now; null when no pay is listed or there's no current package.
+	Pay *comp.PostingPay `json:"pay"`
 }
 
-func toOptionJSON(o radar.Option, p *pipeline.Pursuit) optionJSON {
+func toOptionJSON(o radar.Option, p *pipeline.Pursuit, now *comp.Yardstick) optionJSON {
 	out := optionJSON{ID: o.ID, Company: o.Company, Title: o.Title, Locations: o.Locations, URL: o.URL, Source: o.Source,
 		Comp: radar.Comp(o.CompMin, o.CompMax), PostedAt: o.PostedAt, FirstSeenAt: o.FirstSeenAt, Tier: o.Tier, Category: o.Category,
 		Fit: o.FitScore, RankScore: o.RankScore, Priority: priorityName(o.Priority), Summary: o.FitSummary,
 		Reasons: lines(o.FitReasons), Gaps: lines(o.FitGaps), Feedback: o.Feedback, Sent: o.Sent}
 	if p != nil {
 		out.Pursuit = &pursuitRefJSON{ID: p.ID, Ref: p.Ref(), Stage: string(p.Stage)}
+	}
+	if now != nil {
+		out.Pay = now.Posting(o.CompMin, o.CompMax)
 	}
 	return out
 }
@@ -638,6 +644,27 @@ func (s *Server) options(w http.ResponseWriter, r *http.Request) {
 			query.Limit = n
 		}
 	}
+	now := s.payNow()
+	switch pay := q.Get("pay"); pay {
+	case "":
+	case "listed":
+		zero := 0.0
+		query.PayTopAtLeast = &zero
+	case "reach", "beats":
+		if now == nil {
+			writeError(w, http.StatusBadRequest, "Add your current package to the data pack ("+comp.CurrentPath+") to filter by it.")
+			return
+		}
+		total := float64(now.Total)
+		if pay == "reach" {
+			query.PayTopAtLeast = &total
+		} else {
+			query.PayBottomAtLeast = &total
+		}
+	default:
+		writeError(w, http.StatusBadRequest, `pay must be "listed", "reach" or "beats"`)
+		return
+	}
 	ctx := r.Context()
 	page, err := s.Catalog.Options(ctx, query)
 	if err != nil {
@@ -655,10 +682,10 @@ func (s *Server) options(w http.ResponseWriter, r *http.Request) {
 	}
 	options := []optionJSON{}
 	for _, o := range page.Options {
-		options = append(options, toOptionJSON(o, pursuits[o.ID]))
+		options = append(options, toOptionJSON(o, pursuits[o.ID], now))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"options": options, "total": page.Total, "tiers": nonNil(page.Tiers),
-		"categories": nonNil(page.Categories), "unscored": page.Unscored, "defaultMinScore": s.Catalog.MinScore})
+		"categories": nonNil(page.Categories), "unscored": page.Unscored, "defaultMinScore": s.Catalog.MinScore, "payNow": now})
 }
 
 func nonNil(s []string) []string {
@@ -694,7 +721,7 @@ func (s *Server) getItem(w http.ResponseWriter, r *http.Request) {
 		d.Text = "" // GET /api/drafts/{id} has the text
 		dr = append(dr, toDraftJSON(d))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id]), "description": item.Description, "drafts": dr,
+	writeJSON(w, http.StatusOK, map[string]any{"item": toOptionJSON(item.Option, pursuits[id], s.payNow()), "description": item.Description, "drafts": dr,
 		"research": research(item.Company)})
 }
 
@@ -768,10 +795,11 @@ func (s *Server) suggestions(w http.ResponseWriter, r *http.Request) {
 		serverError(w, err)
 		return
 	}
+	now := s.payNow()
 	convert := func(list []pipeline.Suggestion) []suggestionJSON {
 		out := []suggestionJSON{}
 		for _, sg := range list {
-			j := suggestionJSON{optionJSON: toOptionJSON(sg.Option, nil), ApplyURL: sg.ApplyURL}
+			j := suggestionJSON{optionJSON: toOptionJSON(sg.Option, nil, now), ApplyURL: sg.ApplyURL}
 			if sg.Kit != nil {
 				k := toDraftJSON(*sg.Kit)
 				k.Text = "" // the kit's text is long; GET /api/drafts/{id} has it
