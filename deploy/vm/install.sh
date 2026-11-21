@@ -81,7 +81,7 @@ previous=$(readlink "$app/current" || true)
 ln -sfn "$dir" "$app/current.new" && mv -T "$app/current.new" "$app/current"
 cp "$dir"/deploy/vm/*.service "$dir"/deploy/vm/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --quiet consigliere.service consigliere-sync.timer
+systemctl enable --quiet consigliere.service consigliere-mcp.service consigliere-sync.timer
 systemctl start consigliere-sync.timer
 
 # ---------- Tailscale: the dashboard on the owner's tailnet ----------
@@ -103,6 +103,8 @@ if ! timeout 60 tailscale serve --bg --https=443 http://127.0.0.1:8080 >/dev/nul
 	echo "tailscale serve failed: turn on MagicDNS and HTTPS Certificates in the tailnet's DNS settings, then deploy again"
 	exit 1
 fi
+# The MCP server (docs/mcp.md) at https://<TS_HOSTNAME>.<tailnet>.ts.net:8443/mcp, the same way.
+timeout 60 tailscale serve --bg --https=8443 http://127.0.0.1:8091 >/dev/null || echo "tailscale serve for MCP failed; the dashboard is unaffected"
 
 # ---------- The data pack, the database, the app ----------
 
@@ -110,7 +112,7 @@ systemctl start consigliere-sync.service || [ -d "$state/pack/.git" ] # an old c
 if [ -n "${RESTORE_BLOB:-}" ] && [ ! -f "$state/pack/db/consigliere.db" ]; then
 	sh "$dir/deploy/vm/restore.sh"
 fi
-systemctl restart consigliere.service
+systemctl restart consigliere.service consigliere-mcp.service
 
 healthy() {
 	i=0
