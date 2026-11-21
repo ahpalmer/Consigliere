@@ -9,6 +9,7 @@ package devbox
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/ahpalmer/consigliere/internal/azure"
+	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/datapack"
 )
 
@@ -52,6 +54,9 @@ type Box struct {
 	ARM string
 	// How long a woken VM gets to answer, and how often to ask. Default 6 minutes and 5 seconds.
 	WakeTimeout, PollEvery time.Duration
+	// Where the last copy of each repo's plan is kept for while the box sleeps (optional), and the clock.
+	DB    *sql.DB
+	Clock clock.Clock
 
 	mu sync.Mutex
 	// Sessions asked for while the VM was asleep, by repo; dropped once opened, kept with Error when that failed.
@@ -67,6 +72,8 @@ type settings struct {
 	Agent string // the agent's base URL on the tailnet
 	VM    string // the VM's Azure resource ID
 	Repos []string
+	// A repo's plan file when it isn't docs/roadmap.md, by repo.
+	Plans map[string]string
 	// Put the VM to sleep after this long with no session output and no one logged in; 0 never.
 	SleepAfter time.Duration
 }
@@ -137,6 +144,7 @@ func (b *Box) settings() (settings, bool, error) {
 		} `yaml:"dev_box"`
 		Repos []struct {
 			Name string `yaml:"name"`
+			Plan string `yaml:"plan"`
 		} `yaml:"repos"`
 	}
 	if err := yaml.Unmarshal([]byte(text), &doc); err != nil {
@@ -155,9 +163,13 @@ func (b *Box) settings() (settings, bool, error) {
 	if h := doc.DevBox.SleepAfterHours; h != nil {
 		s.SleepAfter = time.Duration(max(*h, 0) * float64(time.Hour))
 	}
+	s.Plans = map[string]string{}
 	for _, r := range doc.Repos {
 		if r.Name != "" {
 			s.Repos = append(s.Repos, r.Name)
+			if r.Plan != "" {
+				s.Plans[r.Name] = r.Plan
+			}
 		}
 	}
 	return s, true, nil

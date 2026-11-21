@@ -140,6 +140,13 @@ While the box is up, each repo also shows its branch, uncommitted changes, commi
 commit, and its open pull requests (fetched from GitHub every few minutes). Each open session has a **Stop** button;
 its conversation stays on disk for the next Continue Coding.
 
+Each repo's **Plan** link opens its roadmap: the dev box reads `docs/roadmap.md` (or the file a repo's entry in
+`code/repos.yaml` names with `plan: <path>`) from its clone's default branch, and from each branch with an open pull
+request where it differs. A plan with a milestone table (`| **M20** | what | status |`) shows its open milestones
+first, each with its details paragraph and any branch that says otherwise ("On feature/m13: Built"), and the done
+ones folded away; any other plan is shown as is. While the box sleeps, the page shows the last copy the bot read, and
+says when.
+
 In Telegram, `/code` lists the same, `/code <repo>` opens a session (`/code <repo> new` for a fresh conversation),
 and `/code stop <session>` ends one.
 
