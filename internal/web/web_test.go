@@ -94,6 +94,7 @@ Go services', 'remote', ?)`,
 		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 75, MediumMinScore: 60,
 			MaxHigh: 10, MaxMedium: 20, PerCompany: 2, AutoPrepare: 5},
 		Feedback:    &radar.Feedback{DB: db, Clock: clk},
+		Scoring:     &radar.ScoringRunner{DB: db, Scorer: fakeScorer{}, Ranking: ranking, State: state, Clock: clk},
 		Usage:       llm.NewUsageTracker(),
 		Offers:      &comp.Offers{DB: db, Clock: clk},
 		OfferReader: comp.Extractor{LLM: fakeLLM{}, Owner: "Sam"},
@@ -503,5 +504,47 @@ func TestPursuitShowsPeopleYouKnowThere(t *testing.T) {
 	f.do("GET", "/api/pursuits/"+itoa(activated.Pursuit.ID), "", &detail)
 	if p := detail.People; p == nil || p.Known == nil || len(p.Known) != 0 {
 		t.Fatalf("people at a company with none = %+v", p)
+	}
+}
+
+// fakeScorer gives every posting 91, so a re-score shows.
+type fakeScorer struct{}
+
+func (fakeScorer) BuildContext() (radar.ScoringContext, error) {
+	return radar.ScoringContext{Model: "fake", Categories: []string{"other"}}, nil
+}
+
+func (fakeScorer) Score(context.Context, radar.ScoreInput, radar.ScoringContext) (*radar.ScoreResult, error) {
+	return &radar.ScoreResult{Fit: 91, Category: "other", Summary: "Rescored."}, nil
+}
+
+func TestPastingTheFullPostingRescoresTheItem(t *testing.T) {
+	f := newFixture(t, "")
+	if status := f.do("POST", "/api/items/1/posting", `{"text":"  "}`, nil); status != http.StatusBadRequest {
+		t.Fatalf("empty paste: %d", status)
+	}
+	if status := f.do("POST", "/api/items/99/posting", `{"text":"x"}`, nil); status != http.StatusNotFound {
+		t.Fatalf("missing item: %d", status)
+	}
+	if status := f.do("POST", "/api/items/1/posting", `{"text":"The whole posting. Pay: $170,000 - $210,000"}`, nil); status != http.StatusOK {
+		t.Fatalf("paste: %d", status)
+	}
+	var got struct {
+		Item struct {
+			Fit     int
+			Comp    string
+			Summary string
+		}
+		Description string
+		PastedAt    *time.Time
+	}
+	f.do("GET", "/api/items/1", "", &got)
+	if got.Item.Fit != 91 || got.Item.Summary != "Rescored." || got.PastedAt == nil || !strings.HasPrefix(got.Description, "The whole posting") || got.Item.Comp == "" {
+		t.Fatalf("%+v", got)
+	}
+
+	f.state.Pause()
+	if status := f.do("POST", "/api/items/1/posting", `{"text":"x"}`, nil); status != http.StatusConflict {
+		t.Fatalf("paused: %d", status)
 	}
 }

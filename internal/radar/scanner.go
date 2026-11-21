@@ -159,6 +159,7 @@ type knownItem struct {
 	passed                       bool
 	tier, filterReason, titleKey string
 	hasTitleKey                  bool
+	pasted                       bool // the owner pasted the full posting; the source's copy no longer applies
 }
 
 func (s *Scanner) persist(ctx context.Context, src Source, watched WatchedSource, fetched []FetchedItem, aggregators []string, prefs Preferences) (SourceResult, error) {
@@ -187,8 +188,8 @@ func (s *Scanner) persist(ctx context.Context, src Source, watched WatchedSource
 		ids = append(ids, it.ExternalID)
 	}
 	for chunk := range slices.Chunk(ids, 500) {
-		rows, err := tx.QueryContext(ctx, `SELECT "Id", "ExternalId", "ContentHash", "CompMin", "CompMax", "DigestedAt", "Passed", "Tier", "FilterReason", "TitleKey"
-			FROM "RadarItems" WHERE "Source" = ? AND "Board" = ? AND "ExternalId" IN (`+store.Placeholders(len(chunk))+`)`,
+		rows, err := tx.QueryContext(ctx, `SELECT "Id", "ExternalId", "ContentHash", "CompMin", "CompMax", "DigestedAt", "Passed", "Tier", "FilterReason", "TitleKey",
+			"PastedAt" IS NOT NULL FROM "RadarItems" WHERE "Source" = ? AND "Board" = ? AND "ExternalId" IN (`+store.Placeholders(len(chunk))+`)`,
 			append([]any{kind, watched.Board}, store.Args(chunk)...)...)
 		if err != nil {
 			return SourceResult{}, err
@@ -200,7 +201,7 @@ func (s *Scanner) persist(ctx context.Context, src Source, watched WatchedSource
 				compMin, compMax              sql.NullFloat64
 				digested, tier, reason, title sql.NullString
 			)
-			if err := rows.Scan(&k.id, &ext, &k.contentHash, &compMin, &compMax, &digested, &k.passed, &tier, &reason, &title); err != nil {
+			if err := rows.Scan(&k.id, &ext, &k.contentHash, &compMin, &compMax, &digested, &k.passed, &tier, &reason, &title, &k.pasted); err != nil {
 				rows.Close()
 				return SourceResult{}, err
 			}
@@ -285,12 +286,12 @@ func originalFor(ctx context.Context, tx *sql.Tx, fingerprint, titleKey string, 
 
 // refreshChanged picks up edited postings, parser improvements, and preference edits. Items not yet digested are
 // re-filtered against current preferences; digested ones keep their filter result so nothing already sent is
-// re-sent or dropped. PostedAt and FirstSeenAt are never touched here.
+// re-sent or dropped. PostedAt and FirstSeenAt are never touched here, and nor is a posting the owner pasted.
 func refreshChanged(ctx context.Context, tx *sql.Tx, items []FetchedItem, known map[string]knownItem, prefs Preferences) error {
 	refreshed := 0
 	for _, it := range items {
 		old, ok := known[it.ExternalID]
-		if !ok {
+		if !ok || old.pasted {
 			continue
 		}
 		hash := Hash(it.Title, it.Description)

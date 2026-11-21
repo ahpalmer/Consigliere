@@ -229,6 +229,23 @@ func TestSkippedMailIsReadOnceItsSenderBecomesAllowed(t *testing.T) {
 	}
 }
 
+func TestReadsJobAlertsFromSendersTheWatchlistAdds(t *testing.T) {
+	src, mb, ex, _ := newSource(t)
+	src.AllowedDomains = []string{"linkedin.com"}
+	mb.messages["m1"] = Message{From: "Apple <jobs-noreply@email.apple.com>", Subject: "New jobs for you",
+		HTML: `<a href="https://jobs.apple.com/en-us/details/200555">SRE</a> Apple · Cupertino`}
+	ex.listings = []Listing{{Title: "SRE", Company: "Apple", URL: "https://jobs.apple.com/en-us/details/200555"}}
+
+	// Skipped until apple.com is listed, then read on the next scan.
+	if items, _ := src.Fetch(context.Background(), radar.WatchedSource{}); len(items) != 0 || ex.calls != 0 {
+		t.Fatalf("items %d calls %d before apple.com was listed", len(items), ex.calls)
+	}
+	items, err := src.Fetch(context.Background(), radar.WatchedSource{Senders: []string{"apple.com"}})
+	if err != nil || len(items) != 1 || items[0].Company != "Apple" {
+		t.Fatalf("items %+v err %v", items, err)
+	}
+}
+
 func TestBackfillKeepsUpdatesAndDropsListings(t *testing.T) {
 	src, mb, ex, _ := newSource(t)
 	h := &recordingHandler{}

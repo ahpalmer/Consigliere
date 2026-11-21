@@ -24,8 +24,10 @@ export function ItemPage() {
       </>
     );
   }
-  const { item: o, description } = item.data;
+  const { item: o, description, pastedAt } = item.data;
   const long = description.length > 1800;
+  // Alert emails carry only a snippet, so the score is a rough one until the full posting is pasted.
+  const snippetOnly = o.source === "email" && !pastedAt;
 
   return (
     <>
@@ -88,7 +90,8 @@ export function ItemPage() {
           <Research links={item.data.research} />
         </div>
         <div className="stack">
-          <Panel title="Posting">
+          <Panel title="Posting" actions={pastedAt && <span className="muted small">pasted {shortDate(pastedAt)}</span>}>
+            <PastePosting itemId={o.id} snippetOnly={snippetOnly} onChange={item.reload} />
             {description ? (
               <>
                 <p className="prewrap posting">{long && !full ? description.slice(0, 1800) + "…" : description}</p>
@@ -105,6 +108,56 @@ export function ItemPage() {
         </div>
       </div>
     </>
+  );
+}
+
+function PastePosting({ itemId, snippetOnly, onChange }: { itemId: number; snippetOnly: boolean; onChange: () => Promise<void> }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const { run, busy, error } = useAction();
+  if (!open) {
+    return snippetOnly ? (
+      <div className="banner warn">
+        This came from an alert email, which only has a snippet, so the score is a rough one. Paste the full posting to re-score it.
+        <div className="row">
+          <button className="btn small primary" onClick={() => setOpen(true)}>
+            Paste full posting
+          </button>
+        </div>
+      </div>
+    ) : (
+      <button className="btn ghost small" onClick={() => setOpen(true)}>
+        Paste full posting
+      </button>
+    );
+  }
+  return (
+    <form
+      className="subform"
+      onSubmit={async (e) => {
+        e.preventDefault();
+        if (await run(() => api.pastePosting(itemId, text.trim()))) {
+          setText("");
+          setOpen(false);
+          await onChange();
+        }
+      }}
+    >
+      <p className="muted small">
+        Open the job, copy the whole description, and paste it here. It replaces the text below, the pay range is taken from it when
+        listed, and the job is re-scored.
+      </p>
+      <textarea rows={8} value={text} onChange={(e) => setText(e.target.value)} />
+      <div className="row">
+        <button className="btn primary" disabled={busy || !text.trim()}>
+          {busy ? "Scoring…" : "Re-score"}
+        </button>
+        <button type="button" className="btn ghost" onClick={() => setOpen(false)}>
+          Cancel
+        </button>
+      </div>
+      <ErrorNote message={error} />
+    </form>
   );
 }
 

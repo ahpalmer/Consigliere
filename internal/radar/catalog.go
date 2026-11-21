@@ -149,17 +149,23 @@ func (s scanTail) Scan(dest ...any) error { return s.r.Scan(append(dest, s.extra
 type ItemDetail struct {
 	Option
 	Description string
+	// When the owner pasted the full posting over the source's text; nil when they haven't.
+	PastedAt *time.Time
 }
 
 func (c *Catalog) Item(ctx context.Context, id int64) (ItemDetail, error) {
 	var d ItemDetail
 	var wasSent bool
-	v, err := scanItemView(scanTail{c.DB.QueryRowContext(ctx, `SELECT `+itemViewColumns+`, "DigestedAt" IS NOT NULL, "Description"
-		FROM "RadarItems" WHERE "Id" = ?`, id), []any{&wasSent, &d.Description}})
+	var pasted sql.NullString
+	v, err := scanItemView(scanTail{c.DB.QueryRowContext(ctx, `SELECT `+itemViewColumns+`, "DigestedAt" IS NOT NULL, "Description", "PastedAt"
+		FROM "RadarItems" WHERE "Id" = ?`, id), []any{&wasSent, &d.Description, &pasted}})
 	if errors.Is(err, sql.ErrNoRows) {
 		return d, ErrNotFound
 	}
 	if err != nil {
+		return d, err
+	}
+	if d.PastedAt, err = store.ParseTimePtr(pasted); err != nil {
 		return d, err
 	}
 	ranking, err := c.Ranking.Create()

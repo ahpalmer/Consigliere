@@ -369,7 +369,10 @@ export const api = {
     if (q.minScore !== undefined) params.set("minScore", String(q.minScore));
     return get<OptionsPage>(`/api/options?${params}`);
   },
-  item: (id: number) => get<{ item: Option; description: string; drafts: Draft[]; research: SearchLink[] }>(`/api/items/${id}`),
+  item: (id: number) =>
+    get<{ item: Option; description: string; pastedAt: string | null; drafts: Draft[]; research: SearchLink[] }>(`/api/items/${id}`),
+  /** Puts the full posting in place of what the source gave, and re-scores the job with it. */
+  pastePosting: (id: number, text: string) => send<{ rescored: boolean }>("POST", `/api/items/${id}/posting`, { text }),
   feedback: (id: number, value: 1 | -1) => send<{ feedback: number }>("PUT", `/api/items/${id}/feedback`, { value }),
   coverLetter: (itemId: number, instructions: string) => send<Draft>("POST", `/api/items/${itemId}/cover`, { instructions }),
 

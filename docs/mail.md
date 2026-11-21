@@ -14,14 +14,15 @@ real inbox ──(filters: job mail only, never security mail → forward/redire
 - `mail.Source` is a Radar source (`ats: email`). Each scan lists recent messages (`Mail:Query`, Spam included with
   `Mail:IncludeSpam`, since forwarded mail sometimes lands there), skips ones already in `ProcessedMessages`, and reads only
   allowed senders, so nothing else reaches the LLM:
-  - job sites (`Mail:AllowedSenderDomains`),
+  - job sites (`Mail:AllowedSenderDomains`), plus any the watchlist's email entry adds under `senders:`, such as a
+    company's own career site that sends job alerts (`senders: [apple.com]`),
   - application and scheduling systems (`Mail:UpdateSenderDomains`: Greenhouse, Lever, Ashby, Workday, Calendly, ...),
   - companies with an open pursuit: a sender domain part equal to the company's name (`careers.google.com` for Google,
     `redhat.com` for Red Hat).
 
   `Mail:BlockedSenders` (account-security senders: sign-in codes, resets) are never read, whatever the domain. A message
   skipped as "sender not allowed" is checked again on later scans, so a recruiter's email is read once their company
-  becomes a pursuit.
+  becomes a pursuit, and a career site's alerts are read once its domain is added under `senders:`.
 - A cheap model reads each allowed message into structured JSON (`internal/mail/prompts/read.md`): the job listings it
   advertises, and what it says about one of the owner's applications. Per-sender parsers would break whenever a
   template changes; this works across senders. The model has no tools; its only output is that JSON.
@@ -85,18 +86,21 @@ message says what it found. Old interview requests don't reopen anything.
 ## Alerts for companies with no public board
 
 Some companies (Apple, for one) don't post on Greenhouse, Lever or Ashby, and their careers sites forbid automated
-access. Their jobs still reach the agent through alert emails from a job site that lists them:
+access. Their jobs still reach the agent through alert emails, from the company's own career site or from a job site
+that lists them:
 
-1. On Glassdoor (or LinkedIn), search jobs for that company with the keywords you want, then turn on a **job alert**
-   for the search, sent by email, daily. One alert per search (for example, one for platform and SRE roles and one for
-   computer vision).
-2. Make sure the real inbox's forwarding filter covers the alert's sender (`from:glassdoor.com`). `glassdoor.com` is
-   already in `Mail:AllowedSenderDomains`.
-3. Put the company under `company_priority: high` in `radar/preferences.yaml` if its jobs should rank first.
+1. Turn on a **job alert** by email, daily: on the company's career site, or on Glassdoor or LinkedIn for a search of
+   that company's jobs with the keywords you want. One alert per search (for example, one for platform and SRE roles
+   and one for computer vision).
+2. Make sure the real inbox's forwarding filter covers the alert's sender (`from:glassdoor.com`, `from:apple.com`).
+3. Job sites are already allowed (`Mail:AllowedSenderDomains`). For a company's own alerts, add its domain to the
+   email entry in `radar/watchlist.yaml`: `- { name: Alert emails, ats: email, board: gmail, senders: [apple.com] }`.
 
-Alerts carry a title, location and a line or two, not the full posting, so their scores are rough. Open the ones worth
-it and judge from the posting itself. The agent never visits Glassdoor; the dashboard only links to it (each job and
-pursuit page has a **Company research** link to the company's reviews, pay reports and interview questions).
+Alerts carry a title, location and a line or two, not the full posting, so their scores are rough. For the ones worth
+it, open the posting, copy its text, and use **Paste full posting** on the job's page: the text replaces the snippet,
+the pay range is taken from it when listed, and the job is re-scored on the spot. The alert arriving again never
+overwrites pasted text. The agent never visits Glassdoor or the career site; the dashboard only links to them (each job
+and pursuit page has a **Company research** link to the company's reviews, pay reports and interview questions).
 
 ## Apply kits in the inbox
 
