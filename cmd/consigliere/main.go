@@ -174,7 +174,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	}
 
 	// The Code page's dev box (M18, M19): also /code in Telegram, and putting the box to sleep when it's idle.
-	codeBox := &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv()}
+	codeBox := &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv(), DB: db, Clock: clk}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
 	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands, pipelineCommands, &devbox.Commands{Box: codeBox}),
