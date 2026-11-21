@@ -56,3 +56,24 @@ func (s *Server) startCodeSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, err.Error())
 	}
 }
+
+// stopCodeSession ends a session; its conversation stays on the dev box for the next Continue Coding.
+func (s *Server) stopCodeSession(w http.ResponseWriter, r *http.Request) {
+	if !s.codeEnabled() {
+		writeError(w, http.StatusNotFound, "no dev box set up")
+		return
+	}
+	err := s.Code.Stop(r.Context(), r.PathValue("name"))
+	var refused *devbox.AgentError
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, map[string]bool{"stopped": true})
+	case errors.As(err, &refused) && refused.Status == http.StatusNotFound:
+		writeError(w, http.StatusNotFound, refused.Message)
+	case errors.As(err, &refused):
+		writeError(w, http.StatusConflict, refused.Message)
+	default:
+		slog.Warn("couldn't stop a dev box session", "session", r.PathValue("name"), "err", err)
+		writeError(w, http.StatusBadGateway, "The dev box doesn't answer: "+err.Error())
+	}
+}

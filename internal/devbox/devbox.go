@@ -67,6 +67,8 @@ type settings struct {
 	Agent string // the agent's base URL on the tailnet
 	VM    string // the VM's Azure resource ID
 	Repos []string
+	// Put the VM to sleep after this long with no session output and no one logged in; 0 never.
+	SleepAfter time.Duration
 }
 
 // Status is what the Code page shows.
@@ -82,9 +84,31 @@ type Status struct {
 type Repo struct {
 	Name     string    `json:"name"`
 	Sessions []Session `json:"sessions"`
+	// From the dev box's clone, while it's up: the checked-out branch, uncommitted files, commits ahead of and behind
+	// its upstream (nil without one), the last commit, and open PRs (nil when GitHub didn't answer).
+	Branch     string  `json:"branch"`
+	Changes    int     `json:"changes"`
+	Ahead      *int    `json:"ahead"`
+	Behind     *int    `json:"behind"`
+	LastCommit *Commit `json:"lastCommit"`
+	PRs        []PR    `json:"prs"`
+	Known      bool    `json:"known"` // false: the box is asleep or the repo isn't cloned yet, so the fields above are empty
 	// A session asked for while the VM was asleep: "continue" or "new" while it wakes, with Error if that failed.
 	Waiting string `json:"waiting"`
 	Error   string `json:"error"`
+}
+
+type Commit struct {
+	Subject string    `json:"subject"`
+	At      time.Time `json:"at"`
+}
+
+type PR struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	URL    string `json:"url"`
+	Branch string `json:"branch"`
+	Draft  bool   `json:"draft"`
 }
 
 type Session struct {
@@ -108,6 +132,8 @@ func (b *Box) settings() (settings, bool, error) {
 		DevBox struct {
 			Agent string `yaml:"agent"`
 			VM    string `yaml:"vm"`
+			// Hours; missing means 3, 0 means never.
+			SleepAfterHours *float64 `yaml:"sleep_after_hours"`
 		} `yaml:"dev_box"`
 		Repos []struct {
 			Name string `yaml:"name"`
@@ -125,7 +151,10 @@ func (b *Box) settings() (settings, bool, error) {
 	if !strings.HasPrefix(doc.DevBox.VM, "/subscriptions/") {
 		return settings{}, false, fmt.Errorf("%s: dev_box.vm must be the VM's resource ID, /subscriptions/...", reposFile)
 	}
-	s := settings{Agent: strings.TrimRight(doc.DevBox.Agent, "/"), VM: doc.DevBox.VM}
+	s := settings{Agent: strings.TrimRight(doc.DevBox.Agent, "/"), VM: doc.DevBox.VM, SleepAfter: 3 * time.Hour}
+	if h := doc.DevBox.SleepAfterHours; h != nil {
+		s.SleepAfter = time.Duration(max(*h, 0) * float64(time.Hour))
+	}
 	for _, r := range doc.Repos {
 		if r.Name != "" {
 			s.Repos = append(s.Repos, r.Name)
@@ -164,10 +193,17 @@ func (b *Box) Status(ctx context.Context) (Status, error) {
 			out.VM = name
 		}
 	}
+	var details map[string]Repo
+	if out.VM == "running" && out.VMError == "" {
+		details, _ = b.repos(ctx, s) // the page still works without them
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, name := range s.Repos {
 		r := Repo{Name: name, Sessions: []Session{}}
+		if d, ok := details[name]; ok {
+			r.Branch, r.Changes, r.Ahead, r.Behind, r.LastCommit, r.PRs, r.Known = d.Branch, d.Changes, d.Ahead, d.Behind, d.LastCommit, d.PRs, true
+		}
 		for _, ses := range sessions {
 			if ses.Repo == name {
 				r.Sessions = append(r.Sessions, ses)
@@ -266,7 +302,83 @@ func (b *Box) openWhenAwake(s settings, repo string, w *waiting) {
 	}
 }
 
+// Stop ends a session; its conversation stays on disk for the next Continue Coding.
+func (b *Box) Stop(ctx context.Context, name string) error {
+	s, ok, err := b.settings()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return ErrUnknownRepo
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	err = b.call(ctx, http.MethodDelete, s.Agent+"/sessions/"+url.PathEscape(name), nil, nil, nil)
+	var refused *replyError
+	if errors.As(err, &refused) {
+		return &AgentError{Status: refused.Status, Message: refused.Message}
+	}
+	return err
+}
+
+// Slept is what SleepIfIdle did: put the VM to sleep after it was idle this long, or nothing (zero).
+type Slept struct{ IdleFor time.Duration }
+
+// SleepIfIdle deallocates the VM when its agent says nothing has happened for the data pack's sleep_after_hours: no
+// session printing anything and no one logged in. A box that doesn't answer is left alone (asleep, or booting).
+func (b *Box) SleepIfIdle(ctx context.Context, now time.Time) (Slept, error) {
+	s, ok, err := b.settings()
+	if err != nil || !ok || s.SleepAfter <= 0 {
+		return Slept{}, err
+	}
+	b.mu.Lock()
+	waking := len(b.waiting) > 0
+	b.mu.Unlock()
+	if waking {
+		return Slept{}, nil // a session was just asked for
+	}
+	actx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	var activity struct {
+		IdleSince time.Time `json:"idleSince"`
+	}
+	if err := b.call(actx, http.MethodGet, s.Agent+"/activity", nil, nil, &activity); err != nil || activity.IdleSince.IsZero() {
+		return Slept{}, nil
+	}
+	idle := now.Sub(activity.IdleSince)
+	if idle < s.SleepAfter {
+		return Slept{}, nil
+	}
+	token, err := b.Tokens.Token(ctx, armScope)
+	if err != nil {
+		return Slept{}, err
+	}
+	if err := b.call(ctx, http.MethodPost, b.armURL(s, "/deallocate"), &token, nil, nil); err != nil {
+		var refused *replyError
+		if errors.As(err, &refused) && refused.Status == http.StatusForbidden {
+			return Slept{}, errors.New("the bot may not put the dev box to sleep yet: redeploy infra/dev.bicep to give it the deallocate permission")
+		}
+		return Slept{}, fmt.Errorf("put the dev box to sleep: %w", err)
+	}
+	return Slept{IdleFor: idle}, nil
+}
+
 // --- the agent ---
+
+// repos asks the agent for each repo's branch, changes and PRs; it can take a few seconds when PRs aren't cached.
+func (b *Box) repos(ctx context.Context, s settings) (map[string]Repo, error) {
+	ctx, cancel := context.WithTimeout(ctx, 25*time.Second)
+	defer cancel()
+	var out struct{ Repos []Repo }
+	if err := b.call(ctx, http.MethodGet, s.Agent+"/repos", nil, nil, &out); err != nil {
+		return nil, err
+	}
+	byName := map[string]Repo{}
+	for _, r := range out.Repos {
+		byName[r.Name] = r
+	}
+	return byName, nil
+}
 
 func (b *Box) sessions(ctx context.Context, s settings) ([]Session, error) {
 	ctx, cancel := context.WithTimeout(ctx, 4*time.Second)
