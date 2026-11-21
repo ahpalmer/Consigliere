@@ -1302,3 +1302,135 @@ textarea.mono {
   flex-basis: 100%;
   font-size: 0.85rem;
 }
+
+/* --- sections & adventures (M13) --- */
+
+.sections {
+  display: flex;
+  padding: 3px;
+  gap: 2px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface);
+}
+
+.sections a {
+  padding: 0.25rem 0.7rem;
+  border-radius: 999px;
+  text-decoration: none;
+  color: var(--ink-2);
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.sections a.active {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.form-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.form-grid textarea,
+.form-grid input,
+.form-grid select {
+  width: 100%;
+}
+
+.idea-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.idea h2,
+.adventure h2 {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.idea,
+.adventure {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.idea p,
+.adventure p {
+  margin: 0;
+}
+
+.fav {
+  font-size: 1.2rem;
+  color: var(--ink-3);
+}
+
+.fav.on {
+  color: var(--accent);
+}
+
+.stars {
+  display: inline-flex;
+  gap: 0.1rem;
+  color: var(--line-strong);
+  font-size: 1.1rem;
+}
+
+.stars .on {
+  color: var(--warn);
+}
+
+.stars button {
+  border: 0;
+  background: none;
+  padding: 0.1rem 0.15rem;
+  font-size: 1.5rem;
+  line-height: 1;
+  color: inherit;
+  cursor: pointer;
+}
+
+.stars button.on,
+.stars button:hover {
+  color: var(--warn);
+}
+
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.history-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.8rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+@media (max-width: 560px) {
+  .topbar-inner {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 56px;
+    padding-block: 0.5rem;
+  }
+  .form-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

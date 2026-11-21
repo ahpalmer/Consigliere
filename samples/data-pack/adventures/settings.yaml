@@ -1,0 +1,9 @@
+# Turns on the dashboard's Adventures section: an idea bank, plans with Telegram reminders, ratings afterward, and
+# ideas generated from constraints and past ratings. Delete this file to turn the section off.
+
+# Nudge when nothing's planned and the last adventure was this many days ago.
+cadence_days: 14
+# For generated ideas: where you start from, who you go with, and what you like and avoid, in your own words.
+home: Raleigh, NC
+with: Sam's partner
+likes: Outdoors, good food, live music, small towns. Not crowds or long drives on a weeknight.

@@ -65,6 +65,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	}))
 	mux.HandleFunc("POST /api/pursuits/{id}/drafts", s.startDraft)
 	s.offerRoutes(mux)
+	s.adventureRoutes(mux)
 
 	mux.HandleFunc("GET /api/drafts/{id}", s.getDraft)
 	mux.HandleFunc("GET /api/drafts/{id}/file", s.draftFile)

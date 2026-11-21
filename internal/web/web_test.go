@@ -15,6 +15,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/ahpalmer/consigliere/internal/adventures"
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/comp"
@@ -93,13 +94,15 @@ Go services', 'remote', ?)`,
 		// The sample pack blends fit with location and pay, so the 88 remote match with no pay listed ranks lower.
 		Suggestions: &pipeline.Suggestions{Catalog: catalog, Pipeline: pl, Drafts: drafts, HighMinScore: 75, MediumMinScore: 60,
 			MaxHigh: 10, MaxMedium: 20, PerCompany: 2, AutoPrepare: 5},
-		Feedback:    &radar.Feedback{DB: db, Clock: clk},
-		Scoring:     &radar.ScoringRunner{DB: db, Scorer: fakeScorer{}, Ranking: ranking, State: state, Clock: clk},
-		Usage:       llm.NewUsageTracker(),
-		Offers:      &comp.Offers{DB: db, Clock: clk},
-		OfferReader: comp.Extractor{LLM: fakeLLM{}, Owner: "Sam"},
-		Pack:        pack,
-		Assets:      fstest.MapFS{"index.html": {Data: []byte("<!doctype html><div id=root></div>")}, "assets/app.js": {Data: []byte("1")}},
+		Feedback:      &radar.Feedback{DB: db, Clock: clk},
+		Scoring:       &radar.ScoringRunner{DB: db, Scorer: fakeScorer{}, Ranking: ranking, State: state, Clock: clk},
+		Usage:         llm.NewUsageTracker(),
+		Offers:        &comp.Offers{DB: db, Clock: clk},
+		OfferReader:   comp.Extractor{LLM: fakeLLM{}, Owner: "Sam"},
+		Pack:          pack,
+		Adventures:    &adventures.Store{DB: db, Clock: clk, Location: location},
+		IdeaGenerator: fakeIdeas{},
+		Assets:        fstest.MapFS{"index.html": {Data: []byte("<!doctype html><div id=root></div>")}, "assets/app.js": {Data: []byte("1")}},
 	}
 	srv := httptest.NewServer(s.Handler())
 	t.Cleanup(srv.Close)
@@ -546,5 +549,66 @@ func TestPastingTheFullPostingRescoresTheItem(t *testing.T) {
 	f.state.Pause()
 	if status := f.do("POST", "/api/items/1/posting", `{"text":"x"}`, nil); status != http.StatusConflict {
 		t.Fatalf("paused: %d", status)
+	}
+}
+
+type fakeIdeas struct{}
+
+func (fakeIdeas) Generate(_ context.Context, settings adventures.Settings, constraints string) ([]adventures.Idea, error) {
+	return []adventures.Idea{{Title: "Night hike near " + settings.Home, Description: constraints, Source: "generated"}}, nil
+}
+
+func TestAdventures(t *testing.T) {
+	f := newFixture(t, "")
+	var session struct{ Adventures bool }
+	f.do("GET", "/api/session", "", &session)
+	if !session.Adventures {
+		t.Fatal("the sample pack turns Adventures on")
+	}
+
+	var idea adventures.Idea
+	if status := f.do("POST", "/api/adventures/ideas", `{"title":"Hike Umstead","cost":"$","tags":["outdoors"]}`, &idea); status != http.StatusCreated {
+		t.Fatalf("add idea: %d", status)
+	}
+	if status := f.do("POST", "/api/adventures/ideas", `{"title":""}`, nil); status != http.StatusBadRequest {
+		t.Fatalf("an idea without a title: %d", status)
+	}
+	f.do("POST", "/api/adventures/ideas/"+strconv.FormatInt(idea.ID, 10)+"/favorite", `{"favorite":true}`, &idea)
+	if !idea.Favorite {
+		t.Fatal("not favorited")
+	}
+
+	var a adventures.Adventure
+	if status := f.do("POST", "/api/adventures", `{"ideaId":`+strconv.FormatInt(idea.ID, 10)+`,"date":"2026-11-01"}`, &a); status != http.StatusCreated || a.Title != "Hike Umstead" {
+		t.Fatalf("plan: %d %+v", status, a)
+	}
+	if status := f.do("POST", "/api/adventures", `{"title":"x","date":"soon"}`, nil); status != http.StatusBadRequest {
+		t.Fatalf("a bad date: %d", status)
+	}
+	id := strconv.FormatInt(a.ID, 10)
+	if status := f.do("POST", "/api/adventures/"+id+"/rate", `{"rating":5,"review":"Great"}`, &a); status != http.StatusOK || a.Status != "done" {
+		t.Fatalf("rate: %d %+v", status, a)
+	}
+	var list struct {
+		Today    string
+		Upcoming []adventures.Adventure
+		History  []adventures.Adventure
+	}
+	f.do("GET", "/api/adventures", "", &list)
+	if len(list.Upcoming) != 0 || len(list.History) != 1 || list.Today != "2026-10-28" {
+		t.Fatalf("%+v", list)
+	}
+	if status := f.do("POST", "/api/adventures/999/skip", `{}`, nil); status != http.StatusNotFound {
+		t.Fatalf("skip a missing one: %d", status)
+	}
+
+	var generated struct{ Ideas []adventures.Idea }
+	f.do("POST", "/api/adventures/generate", `{"constraints":"rainy"}`, &generated)
+	if len(generated.Ideas) != 1 || generated.Ideas[0].Title != "Night hike near Raleigh, NC" || generated.Ideas[0].Description != "rainy" {
+		t.Fatalf("%+v", generated)
+	}
+	f.state.Pause()
+	if status := f.do("POST", "/api/adventures/generate", `{"constraints":"rainy"}`, nil); status != http.StatusConflict {
+		t.Fatalf("generate while paused: %d", status)
 	}
 }
