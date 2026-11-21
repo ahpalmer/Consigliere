@@ -23,14 +23,14 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code | Done |
 | **M11** | A high-priority source with no public feed: alert emails (job sites and company career sites) plus pasted details, re-score on demand | Done |
 | **M12** | One small VM per bot: systemd, secrets from Key Vault into memory, Tailscale, per-branch deploys | Done |
-| **M13** | Dashboard sections, starting with **Adventures**: idea bank, planning, reminders, ratings (branch `feature/m13-adventures`) | In progress |
+| **M13** | Dashboard sections, starting with **Adventures**: idea bank, planning, reminders, ratings ([#6](https://github.com/ahpalmer/Consigliere/pull/6)) | Built, waiting on you |
 | **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Blocked: waiting on you ([below](#waiting-on-you)) |
-| **M15** | MCP server as its own program, calling the bot's API (branch `feature/m15-mcp`) | Phase 1 done |
+| **M15** | MCP server as its own program, calling the bot's API ([#7](https://github.com/ahpalmer/Consigliere/pull/7)) | Phases 1-4 built; phase 5 is your call |
 | **M16** | Dev box: a VM on the tailnet with Tailscale SSH and the toolchains, no Azure rights ([dev-box.md](dev-box.md)) | Done |
 | **M17** | Repos on the dev box: synced from a list, pushes with one scoped, expiring GitHub token | Done |
 | **M18** | A **Code** page: each repo active or not, Continue Coding / New Session open a Remote Control session, waking the VM | Done |
-| **M19** | More on the Code page: branch and changes per repo, stop a session, `/code` in Telegram, sleep when idle | Planned |
-| **M20** | The plan on the Code page: open a repo to read its roadmap, open milestones first | Planned |
+| **M19** | More on the Code page: branch and changes per repo, stop a session, `/code` in Telegram, sleep when idle ([#8](https://github.com/ahpalmer/Consigliere/pull/8)) | Built, waiting on you |
+| **M20** | The plan on the Code page: open a repo to read its roadmap, open milestones first ([#9](https://github.com/ahpalmer/Consigliere/pull/9), after #8) | Built, waiting on you |
 
 ## Details for open milestones
 
@@ -56,7 +56,10 @@ overwrites it). The "top picks" view was dropped: Options already sorts by fit. 
 **M13: Adventures.** A section switcher in the dashboard (each bot turns sections on in config). Adventures has these pages:
 Upcoming, Ideas (add, generate, favorite), Generate (constraints in, 5 ideas out, using past ratings) and History.
 Reminders go through Telegram: a cadence nudge, prep due dates, the day before and the day of, then a rating
-afterward. Before merging, it's tested with a separate test bot.
+afterward. Before merging, it's tested with a separate test bot. **Built** (#6, `internal/adventures`): a bot gets the
+section when its data pack has `adventures/settings.yaml`; reminders go out at 9am (`Adventures:ReminderCron`) with
+⭐1-5 buttons the day after, and the generator uses past ratings, reviews, favorites and `likes`. **Next:** on your
+list.
 
 **M14: Second bot's field.** **Blocked:** waiting on you (see [below](#waiting-on-you)). Talk it through with that bot's owner, then rewrite their data pack (profile, preferences, sources) and
 add sources that carry their kind of work (alert emails, documented public APIs). Also make the shared code
@@ -65,11 +68,18 @@ the shared config.
 
 **M15: MCP server.** `consigliere-mcp` uses the official Go SDK and calls a bot's dashboard API with its token.
 It never opens the database.
-1. Read-only tools over stdio. **Done:** search, get item, list and get pursuits, suggestions, status.
-2. Resources and prompts.
-3. Write tools with annotations, plus progress reporting for long drafts.
-4. Streamable HTTP next to each bot, behind Tailscale.
-5. Optional central service: OAuth, one bot per user, stateless and scalable. Costs isolation and a third VM.
+1. Read-only tools over stdio. **Built** (#7, rebuilt: the earlier phase 1 was never pushed): summary, status,
+   search, get item, list and get pursuits, suggestions, drafts, offers.
+2. Resources and prompts. **Built:** the reads as `consigliere://` resources, and prompts for triage, interview prep,
+   a weekly review and weighing an offer.
+3. Write tools with annotations, plus progress reporting for long drafts. **Built:** make active, rate, paste a
+   posting, checklist steps, applied, follow-up, interview, complete and reopen, notes, drafts (waited on, with
+   progress), offers, pause and resume.
+4. Streamable HTTP next to each bot, behind Tailscale. **Built:** `consigliere mcp-http` in
+   `consigliere-mcp.service`, at `https://<bot>.<tailnet>.ts.net:8443/mcp`. It holds no secret: callers send the
+   dashboard token, checked with the dashboard on each request.
+5. Optional central service: OAuth, one bot per user, stateless and scalable. Costs isolation and a third VM. **Not
+   started:** your call (see [below](#waiting-on-you)).
 
 See [mcp.md](mcp.md).
 
@@ -86,14 +96,15 @@ See [mcp.md](mcp.md).
   machine; when the box is asleep, the bot starts the VM first (a custom role: read and start that one VM).
   **Done:** deployed, and sessions open from the phone (this roadmap was updated from one).
 - **M19:** the page grows: branch, uncommitted changes and open PRs per repo, stopping a session, `/code` in
-  Telegram, and letting the VM sleep after a few idle hours. The dev box stays separate from the bot VMs so coding
+  Telegram, and letting the VM sleep after a few idle hours. **Built** (#8): the agent reads each repo with git and
+  `gh` (read only), and the bot deallocates the box after `sleep_after_hours` (default 3) with nothing going on. The dev box stays separate from the bot VMs so coding
   sessions can never reach a bot's secrets.
 - **M20:** the plan, on the Code page. Clicking a repo opens its roadmap, so "what's the plan?" never needs asking.
   The dev box agent reads the plan file from the repo's synced clone (`docs/roadmap.md` by default, or a `plan:` path
   per repo in `code/repos.yaml`), from the default branch plus any open feature branch's version, and the bot serves it
   to the dashboard. The page shows the open milestones first (not done, in progress, built but not merged) with their
   details, and the done ones folded away. A repo with no plan file just says so. While the dev box sleeps, the last
-  copy the bot saw is shown with its date, rather than waking the VM just to read a file.
+  copy the bot saw is shown with its date, rather than waking the VM just to read a file. **Built** (#9, on top of #8).
 
 ## Waiting on you
 
@@ -101,5 +112,15 @@ Things only you can do. Each one unblocks or finishes a milestone.
 
 - [ ] **M14:** talk through the second bot's owner's field with them (target roles, where they'd move, pay, which job
   sites and alerts they use), then tell me. Until then their data pack and sources stay as they are.
+- [ ] **M13:** choose which bot gets Adventures and add `adventures/settings.yaml` to its data pack (copy the sample
+  in `samples/data-pack/adventures/`: `cadence_days`, `home`, `with`, `likes`). Try it on a test bot first, as planned,
+  then merge #6.
+- [ ] **M15:** merge #7. On the next deploy each bot serves MCP on port 8443; add it to Claude Code or Desktop with
+  the dashboard token (`docs/mcp.md`). Then decide on phase 5 (a central MCP service with OAuth, for claude.ai
+  connectors): it costs a third VM and the bots' isolation, so it isn't built unless you want it.
+- [ ] **M19, M20:** merge #8, then #9. Then redeploy the dev box's infra (`az deployment sub create -n consigliere-dev
+  -l eastus2 -f infra/dev.bicep -p infra/dev.bicepparam`) so the bot may put the box to sleep, and run
+  `bash deploy/dev.sh setup` to install the new agent (repo details, Stop, idle time, plans).
+- [ ] **This roadmap:** merge this PR after the others, so the statuses match what's on `main`.
 - [ ] **M9:** when a real offer comes in, paste it on the pursuit page and check the numbers it reads.
 - [ ] **M11:** paste a few full postings on alert-email jobs and see whether the new scores feel right.
