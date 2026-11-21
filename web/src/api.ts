@@ -331,8 +331,51 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 const get = <T>(path: string) => request<T>("GET", path);
 const send = <T>(method: string, path: string, body?: unknown) => request<T>(method, path, body);
 
+// --- Adventures (M13) ---
+
+export type Cost = "" | "$" | "$$" | "$$$" | "$$$$";
+
+export interface Idea {
+  id: number;
+  title: string;
+  description: string;
+  place: string;
+  cost: Cost;
+  duration: string;
+  tags: string[];
+  source: "manual" | "generated";
+  favorite: boolean;
+  createdAt: string;
+  /** Times done, and the average stars they got (0 when never rated). */
+  done: number;
+  avgRating: number;
+}
+
+export type IdeaInput = Pick<Idea, "title" | "description" | "place" | "cost" | "duration" | "tags"> & { favorite?: boolean; source?: string };
+
+export interface Adventure {
+  id: number;
+  ideaId: number | null;
+  title: string;
+  place: string;
+  notes: string;
+  /** YYYY-MM-DD, the owner's day. */
+  date: string;
+  /** HH:MM, or "". */
+  time: string;
+  prepNote: string;
+  prepDue: string;
+  status: "planned" | "done" | "skipped";
+  rating: number | null;
+  review: string;
+  createdAt: string;
+  completedAt: string | null;
+}
+
+export type AdventureInput = Pick<Adventure, "title" | "place" | "notes" | "date" | "time" | "prepNote" | "prepDue"> & { ideaId?: number | null };
+
 export const api = {
-  session: () => get<{ signInRequired: boolean; signedIn: boolean; code?: boolean }>("/api/session"),
+  session: () => get<{ signInRequired: boolean; signedIn: boolean; code?: boolean; adventures?: boolean }>("/api/session"),
   login: (token: string) => send<{ signedIn: boolean }>("POST", "/api/login", { token }),
   logout: () => send<{ signedIn: boolean }>("POST", "/api/logout"),
 
@@ -388,6 +431,20 @@ export const api = {
   suggestions: () => get<SuggestionsPage>("/api/suggestions"),
   prepareKit: (itemId: number) => send<Draft>("POST", `/api/items/${itemId}/kit`),
   appliedItem: (itemId: number) => send<Pursuit>("POST", `/api/items/${itemId}/applied`),
+
+  adventures: () => get<{ today: string; upcoming: Adventure[]; history: Adventure[] }>("/api/adventures"),
+  planAdventure: (a: AdventureInput) => send<Adventure>("POST", "/api/adventures", a),
+  updateAdventure: (id: number, a: AdventureInput) => send<Adventure>("PUT", `/api/adventures/${id}`, a),
+  rateAdventure: (id: number, rating: number, review: string) => send<Adventure>("POST", `/api/adventures/${id}/rate`, { rating, review }),
+  skipAdventure: (id: number) => send<Adventure>("POST", `/api/adventures/${id}/skip`, {}),
+  deleteAdventure: (id: number) => send<{ deleted: boolean }>("DELETE", `/api/adventures/${id}`),
+  ideas: (q: string, favorites: boolean) =>
+    get<{ ideas: Idea[] }>(`/api/adventures/ideas?${new URLSearchParams({ q, favorites: favorites ? "1" : "" })}`),
+  addIdea: (i: IdeaInput) => send<Idea>("POST", "/api/adventures/ideas", i),
+  updateIdea: (id: number, i: IdeaInput) => send<Idea>("PUT", `/api/adventures/ideas/${id}`, i),
+  favoriteIdea: (id: number, favorite: boolean) => send<Idea>("POST", `/api/adventures/ideas/${id}/favorite`, { favorite }),
+  archiveIdea: (id: number) => send<{ archived: boolean }>("DELETE", `/api/adventures/ideas/${id}`),
+  generateIdeas: (constraints: string) => send<{ ideas: IdeaInput[] }>("POST", "/api/adventures/generate", { constraints }),
 
   code: () => get<CodeStatus>("/api/code"),
   startCodeSession: (repo: string, mode: "continue" | "new") =>

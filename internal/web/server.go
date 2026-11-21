@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ahpalmer/consigliere/internal/adventures"
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/clock"
 	"github.com/ahpalmer/consigliere/internal/comp"
@@ -47,6 +48,11 @@ type Server struct {
 		Extract(ctx context.Context, text string, today time.Time) (*comp.Package, error)
 	}
 	Pack *datapack.Pack
+	// The Adventures section, when the data pack has adventures/settings.yaml.
+	Adventures    *adventures.Store
+	IdeaGenerator interface {
+		Generate(ctx context.Context, settings adventures.Settings, constraints string) ([]adventures.Idea, error)
+	}
 	// Overrides the embedded app (tests).
 	Assets fs.FS
 }
