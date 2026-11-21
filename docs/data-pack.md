@@ -9,6 +9,7 @@ from `DataPack:Path`.
   profile/    who the owner is (see below)
   radar/      preferences.yaml (filters, tiers), watchlist.yaml (sources to poll: boards, the HN thread, alert email)
   comp/       current.yaml: your current pay package, for comparing offers (optional; see below)
+  adventures/ settings.yaml: turns on the dashboard's Adventures section (optional; see dashboard.md)
   code/       repos.yaml: the repositories on the dev box, and its dev_box entry for the Code page (optional; see dev-box.md)
   db/         SQLite database (gitignored in the pack; backed up to blob storage)
 ```

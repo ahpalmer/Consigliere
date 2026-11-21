@@ -25,6 +25,7 @@ import (
 
 	_ "time/tzdata" // IANA zones work on Windows and in minimal containers
 
+	"github.com/ahpalmer/consigliere/internal/adventures"
 	"github.com/ahpalmer/consigliere/internal/agent"
 	"github.com/ahpalmer/consigliere/internal/azure"
 	"github.com/ahpalmer/consigliere/internal/backup"
@@ -175,10 +176,12 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 
 	// The Code page's dev box (M18, M19): also /code in Telegram, and putting the box to sleep when it's idle.
 	codeBox := &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv(), DB: db, Clock: clk}
+	// Adventures (M13): its job and buttons do nothing for a bot whose data pack doesn't turn the section on.
+	adventureStore := &adventures.Store{DB: db, Clock: clk, Location: location}
 
 	chat := llm.NewChat(llmClient, llm.SystemPrompt(cfg.Agent.OwnerName))
 	receiver := &telegram.Receiver{API: tg, Sender: sender, Router: router.New(state, chat, usage, radarCommands, pipelineCommands, &devbox.Commands{Box: codeBox}),
-		Callbacks: []channel.CallbackHandler{feedback, pipelineCommands}, Allowed: cfg.Telegram.AllowedChatIds}
+		Callbacks: []channel.CallbackHandler{feedback, pipelineCommands, &adventures.Callbacks{Store: adventureStore}}, Allowed: cfg.Telegram.AllowedChatIds}
 	sched := &scheduler.Scheduler{State: state, Channel: sender, Location: location, PingURL: cfg.Scheduler.HealthchecksPingUrl,
 		Jobs: []scheduler.Job{
 			&radar.ScanJob{Scanner: scanner, Scoring: scoring, Cron: cfg.Radar.ScanCron},
@@ -191,7 +194,8 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	sched.Jobs = append(sched.Jobs,
 		&radar.TuningSummary{DB: db, Channel: sender, Clock: clk, Cron: cfg.Radar.TuningCron},
 		&pipeline.MonthlySummary{Pipeline: pipe, Channel: sender, Cron: cfg.Pipeline.SummaryCron},
-		&devbox.SleepJob{Box: codeBox, Channel: sender, Clock: clk, Cron: "*/15 * * * *"})
+		&devbox.SleepJob{Box: codeBox, Channel: sender, Clock: clk, Cron: "*/15 * * * *"},
+		&adventures.Reminders{Store: adventureStore, Pack: pack, Channel: sender, Cron: cfg.Adventures.ReminderCron})
 	// Backups run where there's somewhere to put them: on the VM, signed in as its managed identity.
 	if cfg.Backup.ContainerUrl != "" {
 		sched.Jobs = append(sched.Jobs, &backup.Job{DB: db,
@@ -208,7 +212,8 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 		dashboard = &web.Server{Addr: cfg.Web.Listen, Token: cfg.Web.Token, Pipeline: pipe, Drafts: drafts, Suggestions: suggestions, Feedback: feedback,
 			Catalog: catalog, Scoring: scoring, State: state, Usage: usage, Clock: clk,
 			Code:   codeBox,
-			Offers: &comp.Offers{DB: db, Clock: clk}, OfferReader: comp.Extractor{LLM: llmClient, Owner: cfg.Agent.OwnerName}, Pack: pack}
+			Offers: &comp.Offers{DB: db, Clock: clk}, OfferReader: comp.Extractor{LLM: llmClient, Owner: cfg.Agent.OwnerName}, Pack: pack,
+			Adventures: adventureStore, IdeaGenerator: adventures.Generator{LLM: llmClient, Owner: cfg.Agent.OwnerName, Store: adventureStore}}
 	}
 
 	// Run until Ctrl+C / SIGTERM, then stop in order: polling, scheduling and the dashboard first, then background
