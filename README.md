@@ -48,6 +48,7 @@ flowchart LR
 | `internal/radar` | Source watching: job boards and HN's "Who is hiring?", normalize, dedupe, filter, score, rank, alert, digest, weekly scoring feedback |
 | `internal/pipeline` | Pursuits: active → waiting → completed, checklist, nudges, morning briefing, suggested applications, email updates, monthly summary |
 | `internal/comp` | Offer comparison: the current package from the data pack vs a pasted offer (read by a cheap model), years 1-4 in plain code |
+| `internal/adventures` | The Adventures section: idea bank, plans, ideas generated from constraints and past ratings, Telegram reminders and ratings |
 | `internal/kit` | Apply kit: contacts from your own export, people-search links, bullet-selected one-page DOCX, drafts |
 | `internal/mail` | Mailbox source (Gmail API + LLM reading, URL-verified): alert listings and application updates; puts apply kits in the same inbox (insert, never send) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |

@@ -25,10 +25,12 @@ type Config struct {
 	Telegram  Telegram
 	Radar     Radar
 	Pipeline  Pipeline
-	Scheduler Scheduler
-	Mail      Mail
-	Web       Web
-	Backup    Backup
+	// The Adventures section; it's on only for a bot whose data pack has adventures/settings.yaml.
+	Adventures Adventures
+	Scheduler  Scheduler
+	Mail       Mail
+	Web        Web
+	Backup     Backup
 }
 
 type DataPack struct {
@@ -37,6 +39,11 @@ type DataPack struct {
 }
 
 type Anthropic struct{ ApiKey string }
+
+type Adventures struct {
+	// When the day's reminders go out: prep due, the day before, the day of, ratings, and the nudge.
+	ReminderCron string
+}
 
 type Agent struct {
 	// Substituted for {{owner}} in prompts. Keep it in secrets, not the committed config.
@@ -176,9 +183,10 @@ func defaults() map[string]any {
 		"Pipeline": map[string]any{"ActiveSoftCap": 10, "FollowUpDays": 7, "GhostDays": 30,
 			"SuggestHighScore": 80, "SuggestMediumScore": 60, "SuggestMaxHigh": 10, "SuggestMaxMedium": 20, "SuggestPerCompany": 2,
 			"AutoPrepareKits": 5, "PrepareCron": "30 7 * * *", "SummaryCron": "0 9 1 * *"},
-		"Scheduler": map[string]any{"TimeZone": "America/New_York"},
-		"Web":       map[string]any{"Listen": "127.0.0.1:8080"},
-		"Backup":    map[string]any{"Cron": "30 3 * * *"},
+		"Scheduler":  map[string]any{"TimeZone": "America/New_York"},
+		"Adventures": map[string]any{"ReminderCron": "0 9 * * *"},
+		"Web":        map[string]any{"Listen": "127.0.0.1:8080"},
+		"Backup":     map[string]any{"Cron": "30 3 * * *"},
 		"Mail": map[string]any{
 			"Query": "newer_than:14d -in:trash", "MaxMessagesPerScan": 100, "IncludeSpam": true,
 			"AllowedSenderDomains": []any{"linkedin.com", "indeed.com", "glassdoor.com", "wellfound.com", "ziprecruiter.com", "dice.com", "builtin.com"},
