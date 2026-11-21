@@ -6,6 +6,12 @@
 //
 // CONSIGLIERE_URL defaults to http://127.0.0.1:8080. The token comes from CONSIGLIERE_TOKEN, or from a file named by
 // --token-file, never from a flag (flags show in process lists). Logs go to stderr; stdout carries the protocol.
+//
+//	consigliere-mcp --http 127.0.0.1:8091
+//
+// serves streamable HTTP instead. On a bot's VM the release's own binary does that (`consigliere mcp-http`, in
+// deploy/vm/consigliere-mcp.service). It holds no token: each caller
+// sends the dashboard token as its bearer token, and it's checked with the dashboard on every request.
 package main
 
 import (
@@ -33,6 +39,7 @@ func main() {
 func run() error {
 	base := flag.String("url", envOr("CONSIGLIERE_URL", "http://127.0.0.1:8080"), "the bot's dashboard address")
 	tokenFile := flag.String("token-file", "", "read the dashboard token from this file instead of CONSIGLIERE_TOKEN")
+	listen := flag.String("http", "", "serve streamable HTTP on this address instead of stdio; callers bring their own token")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
@@ -47,6 +54,9 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if *listen != "" {
+		return (&mcpserver.HTTP{Base: *base, Version: version()}).Serve(ctx, *listen)
+	}
 	s := &mcpserver.Server{API: &mcpserver.API{Base: *base, Token: token}}
 	return s.MCP(version()).Run(ctx, &mcp.StdioTransport{})
 }

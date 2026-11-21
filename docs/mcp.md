@@ -43,6 +43,23 @@ claude mcp add consigliere --env CONSIGLIERE_URL=https://<bot>.<tailnet>.ts.net 
 The machine has to be on the tailnet, as for the dashboard. With two bots, add two servers, each with its own URL and
 token.
 
+### Over HTTP, with nothing to install
+
+Each bot's VM also serves MCP over streamable HTTP at `https://<bot>.<tailnet>.ts.net:8443/mcp`
+(`deploy/vm/consigliere-mcp.service`, published by `tailscale serve` like the dashboard). It's the release's own binary
+(`consigliere mcp-http`) in a process of its own, with no secrets and no database: each caller sends the dashboard
+token as `Authorization: Bearer <token>`, which it checks with the dashboard on every request and passes through.
+Only tailnet devices can reach it.
+
+**Claude Code:**
+
+```sh
+claude mcp add --transport http consigliere https://<bot>.<tailnet>.ts.net:8443/mcp --header "Authorization: Bearer <token>"
+```
+
+Any client that can send a header to a remote MCP server works the same way. claude.ai's custom connectors can't reach
+it: they connect from Anthropic's cloud, which isn't on your tailnet.
+
 ## Tools
 
 Read only (`readOnlyHint`):

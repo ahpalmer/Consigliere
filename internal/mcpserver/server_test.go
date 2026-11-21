@@ -338,3 +338,49 @@ func TestWaitingForADraftReportsProgress(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// withToken adds a bearer token and a tailnet Host header to every request, as a client through `tailscale serve`.
+type withToken struct{ token string }
+
+func (t withToken) RoundTrip(r *http.Request) (*http.Response, error) {
+	r = r.Clone(r.Context())
+	r.Header.Set("Authorization", "Bearer "+t.token)
+	r.Host = "bot.example.ts.net"
+	return http.DefaultTransport.RoundTrip(r)
+}
+
+func TestHTTPChecksTheTokenWithTheDashboard(t *testing.T) {
+	dash, _ := dashboard(t)
+	mux := http.NewServeMux()
+	mux.Handle("/mcp", (&HTTP{Base: dash.URL, Version: "test"}).Handler())
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	for _, token := range []string{"", "wrong"} {
+		req, _ := http.NewRequest(http.MethodPost, srv.URL+"/mcp", strings.NewReader(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`))
+		req.Header.Set("Content-Type", "application/json")
+		if token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusUnauthorized {
+			t.Fatalf("token %q: %d", token, resp.StatusCode)
+		}
+	}
+
+	ctx := context.Background()
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test"}, nil).Connect(ctx,
+		&mcp.StreamableClientTransport{Endpoint: srv.URL + "/mcp", HTTPClient: &http.Client{Transport: withToken{token}}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cs.Close()
+	text, isErr := call(t, cs, "search_options", map[string]any{"query": "SRE"}, nil)
+	if isErr || !strings.Contains(text, `"title":"SRE"`) {
+		t.Fatalf("%v %s", isErr, text)
+	}
+}

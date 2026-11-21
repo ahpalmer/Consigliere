@@ -5,6 +5,7 @@
 //	consigliere secrets set KEY VAL  store a secret (e.g. Telegram:BotToken) outside the repo
 //	consigliere secrets list         show which secrets are set (values hidden)
 //	consigliere keyvault get VAULT NAME  print one Key Vault secret, signed in as the VM's identity (for scripts)
+//	consigliere mcp-http ADDR URL    serve MCP over HTTP for the dashboard at URL (docs/mcp.md)
 //
 // On the VM, --secrets is keyvault://<vault>/<secret>: the secrets JSON is read from Key Vault into memory.
 package main
@@ -37,6 +38,7 @@ import (
 	"github.com/ahpalmer/consigliere/internal/kit"
 	"github.com/ahpalmer/consigliere/internal/llm"
 	"github.com/ahpalmer/consigliere/internal/mail"
+	"github.com/ahpalmer/consigliere/internal/mcpserver"
 	"github.com/ahpalmer/consigliere/internal/pipeline"
 	"github.com/ahpalmer/consigliere/internal/radar"
 	"github.com/ahpalmer/consigliere/internal/router"
@@ -73,8 +75,12 @@ func main() {
 		err = listSecrets(ctx, *secretsPath)
 	case len(args) == 4 && args[0] == "keyvault" && args[1] == "get":
 		err = printVaultSecret(ctx, args[2], args[3])
+	case len(args) == 3 && args[0] == "mcp-http":
+		// The MCP server next to the agent (M15 phase 4): its own process, holding no secret and never opening the
+		// database. It only calls the dashboard, with each caller's own token.
+		err = (&mcpserver.HTTP{Base: args[2], Version: "consigliere"}).Serve(ctx, args[1])
 	default:
-		err = errors.New("usage: consigliere [run | auth gmail | secrets set KEY VALUE | secrets list | keyvault get VAULT NAME]")
+		err = errors.New("usage: consigliere [run | auth gmail | secrets set KEY VALUE | secrets list | keyvault get VAULT NAME | mcp-http ADDR DASHBOARD_URL]")
 	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
