@@ -52,6 +52,7 @@ flowchart LR
 | `internal/mail` | Mailbox source (Gmail API + LLM reading, URL-verified): alert listings and application updates; puts apply kits in the same inbox (insert, never send) |
 | `internal/telegram` | Bot API client, outbound sender, long-polling receiver |
 | `internal/web` | Dashboard server: JSON API, sign-in, and the embedded app |
+| `cmd/consigliere-mcp`, `internal/mcpserver` | MCP server for Claude Desktop and Claude Code: tools, resources and prompts over the dashboard API ([docs/mcp.md](docs/mcp.md)) |
 | `web` | Dashboard app: React + TypeScript (Vite), built into `internal/web/dist` |
 | `internal/router`, `internal/scheduler` | Slash-command routing; cron jobs with failure alerts and healthchecks pings |
 | `internal/azure` | The VM's managed identity and Key Vault secrets, over plain HTTP |
