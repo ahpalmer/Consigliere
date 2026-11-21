@@ -225,6 +225,15 @@ export interface CodeRepo {
   /** A session asked for while the dev box was asleep, opened once it's up. */
   waiting: "" | "continue" | "new";
   error: string;
+  /** From the dev box's clone while it's up (known); empty while it sleeps. */
+  known: boolean;
+  branch: string;
+  changes: number;
+  ahead: number | null;
+  behind: number | null;
+  lastCommit: { subject: string; at: string } | null;
+  /** Open pull requests; null when GitHub didn't answer. */
+  prs: { number: number; title: string; url: string; branch: string; draft: boolean }[] | null;
 }
 
 export type DevBoxState = "running" | "booting" | "starting" | "asleep" | "stopping" | "deallocating" | "unknown";
@@ -383,4 +392,5 @@ export const api = {
   code: () => get<CodeStatus>("/api/code"),
   startCodeSession: (repo: string, mode: "continue" | "new") =>
     send<{ session: string; waking: boolean }>("POST", `/api/code/repos/${encodeURIComponent(repo)}/sessions`, { mode }),
+  stopCodeSession: (name: string) => send<{ stopped: boolean }>("DELETE", `/api/code/sessions/${encodeURIComponent(name)}`),
 };

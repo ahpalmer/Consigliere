@@ -136,6 +136,13 @@ session open, or **Inactive** (red), with two buttons:
   it has none. If the repo already has a session open, it says so instead of forking that conversation.
 - **New Session** opens another session with a new conversation, next to any already open.
 
+While the box is up, each repo also shows its branch, uncommitted changes, commits to push or pull, its last
+commit, and its open pull requests (fetched from GitHub every few minutes). Each open session has a **Stop** button;
+its conversation stays on disk for the next Continue Coding.
+
+In Telegram, `/code` lists the same, `/code <repo>` opens a session (`/code <repo> new` for a fresh conversation),
+and `/code stop <session>` ends one.
+
 Either way the session runs with Remote Control on, so a few seconds later it's in the Claude app → Code, named
 `<repo>-<n>`. If the dev box is asleep, the button wakes it first, and the session opens about a minute later; the
 page shows the progress. Any number of sessions can be open at once, across repos and in the same one, though two in
@@ -146,17 +153,22 @@ How it works:
 
 - **The agent** (`deploy/dev/box/bin/dev-agent`, `dev-agent.service`, as `dev`) answers on the dev box's tailnet
   address, port 8790, and only to tailnet machines tagged `tag:consigliere` (it asks `tailscale whois` who's calling).
-  It can list sessions and open one, nothing else. A session is a tmux session running `dev-session`, which starts
+  It can list, open and stop sessions, read each repo's state (git and `gh`, read only), and say how long the box
+  has been idle, nothing else. A session is a tmux session running `dev-session`, which starts
   `claude [--continue] --remote-control=<name>` in `~/src/<repo>`. Over SSH, `tmux ls` lists them and
   `tmux attach -t <name>` shows the terminal (Ctrl+B then D to leave it running).
 - **Waking:** when the agent doesn't answer, the bot asks Azure for the VM's state and starts it, as its own identity
-  (`id-consigliere-app`), which has a custom role on this one VM: read it and start it. It can't stop or change the VM,
-  or run commands on it.
+  (`id-consigliere-app`), which has a custom role on this one VM: read it, start it, and deallocate it. It can't change
+  the VM or run commands on it.
+- **Sleeping:** every 15 minutes the bot asks the agent how long nothing has happened (no session printing anything,
+  no one logged in over SSH). After `sleep_after_hours` (default 3; 0 never) it deallocates the VM and says so in
+  Telegram. The nightly 03:00 shutdown still applies.
 - **Settings** live in the data pack, so only a bot whose pack has them gets the page:
   ```yaml
   dev_box:
     agent: http://consigliere-dev.<tailnet>.ts.net:8790
     vm: /subscriptions/<id>/resourceGroups/rg-consigliere-dev/providers/Microsoft.Compute/virtualMachines/consigliere-dev
+    sleep_after_hours: 3   # optional; 0 keeps it up until the nightly shutdown
   ```
 - **Each repo is trusted once.** Claude Code asks "trust this folder?" the first time it runs in a folder, and a
   session waiting on that question never reaches the app. Answer it over SSH once per repo (`cd ~/src/<repo>`,
