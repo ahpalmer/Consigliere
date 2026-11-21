@@ -25,7 +25,7 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M12** | One small VM per bot: systemd, secrets from Key Vault into memory, Tailscale, per-branch deploys | Done |
 | **M13** | Dashboard sections, starting with **Adventures**: idea bank, planning, reminders, ratings ([#6](https://github.com/ahpalmer/Consigliere/pull/6)) | Built, waiting on you |
 | **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Blocked: waiting on you ([below](#waiting-on-you)) |
-| **M15** | MCP server as its own program, calling the bot's API ([#7](https://github.com/ahpalmer/Consigliere/pull/7)) | Phases 1-4 built; phase 5 is your call |
+| **M15** | MCP server as its own program, calling the bot's API | Planned: you're building it by hand |
 | **M16** | Dev box: a VM on the tailnet with Tailscale SSH and the toolchains, no Azure rights ([dev-box.md](dev-box.md)) | Done |
 | **M17** | Repos on the dev box: synced from a list, pushes with one scoped, expiring GitHub token | Done |
 | **M18** | A **Code** page: each repo active or not, Continue Coding / New Session open a Remote Control session, waking the VM | Done |
@@ -66,22 +66,14 @@ add sources that carry their kind of work (alert emails, documented public APIs)
 neutral: search links and groups come from data, prompts use field-neutral wording, and per-bot settings move out of
 the shared config.
 
-**M15: MCP server.** `consigliere-mcp` uses the official Go SDK and calls a bot's dashboard API with its token.
-It never opens the database.
-1. Read-only tools over stdio. **Built** (#7, rebuilt: the earlier phase 1 was never pushed): summary, status,
-   search, get item, list and get pursuits, suggestions, drafts, offers.
-2. Resources and prompts. **Built:** the reads as `consigliere://` resources, and prompts for triage, interview prep,
-   a weekly review and weighing an offer.
-3. Write tools with annotations, plus progress reporting for long drafts. **Built:** make active, rate, paste a
-   posting, checklist steps, applied, follow-up, interview, complete and reopen, notes, drafts (waited on, with
-   progress), offers, pause and resume.
-4. Streamable HTTP next to each bot, behind Tailscale. **Built:** `consigliere mcp-http` in
-   `consigliere-mcp.service`, at `https://<bot>.<tailnet>.ts.net:8443/mcp`. It holds no secret: callers send the
-   dashboard token, checked with the dashboard on each request.
-5. Optional central service: OAuth, one bot per user, stateless and scalable. Costs isolation and a third VM. **Not
-   started:** your call (see [below](#waiting-on-you)).
-
-See [mcp.md](mcp.md).
+**M15: MCP server.** An MCP server as its own program that calls a bot's dashboard API with its token and never
+opens the database. **Planned:** you're building this one by hand, to learn how MCP works and how to set it up.
+#7 has a full version to compare against when you want it.
+1. Read-only tools over stdio.
+2. Resources and prompts.
+3. Write tools with annotations, plus progress reporting for long tasks.
+4. Streamable HTTP next to each bot, behind Tailscale.
+5. Optional central service: OAuth, one bot per user. Costs isolation and a third VM.
 
 **M16-M19: Coding from the phone.** The owner works on their repositories from the Claude app with the PC off.
 - **M16:** a separate dev box VM, reachable only over Tailscale SSH: `infra/dev.bicep`, `deploy/dev.sh`,
@@ -115,9 +107,6 @@ Things only you can do. Each one unblocks or finishes a milestone.
 - [ ] **M13:** choose which bot gets Adventures and add `adventures/settings.yaml` to its data pack (copy the sample
   in `samples/data-pack/adventures/`: `cadence_days`, `home`, `with`, `likes`). Try it on a test bot first, as planned,
   then merge #6.
-- [ ] **M15:** merge #7. On the next deploy each bot serves MCP on port 8443; add it to Claude Code or Desktop with
-  the dashboard token (`docs/mcp.md`). Then decide on phase 5 (a central MCP service with OAuth, for claude.ai
-  connectors): it costs a third VM and the bots' isolation, so it isn't built unless you want it.
 - [ ] **M19, M20:** merge #8, then #9. Then redeploy the dev box's infra (`az deployment sub create -n consigliere-dev
   -l eastus2 -f infra/dev.bicep -p infra/dev.bicepparam`) so the bot may put the box to sleep, and run
   `bash deploy/dev.sh setup` to install the new agent (repo details, Stop, idle time, plans).
