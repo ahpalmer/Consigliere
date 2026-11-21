@@ -20,15 +20,15 @@ local secrets file, never in the repo. Only one copy of a bot runs at a time.
 | **M6** | Pipeline: Options → Active → Waiting → Completed, per-item checklist, drafting kit, morning briefing | Done |
 | **M7** | Updates from email move items through the pipeline (confirmations, scheduling, outcomes) | Done |
 | **M8** | React + TypeScript dashboard, reachable only over the tailnet | Done |
-| **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code (branch `feature/m9-package-comparison`) | Built |
-| **M11** | A high-priority source with no public feed: alert emails (job sites and company career sites) plus pasted details, re-score on demand (branch `feature/m11`) | Built |
+| **M9** | Package comparison: an incoming package vs the owner's current one, year by year, in plain code | Done |
+| **M11** | A high-priority source with no public feed: alert emails (job sites and company career sites) plus pasted details, re-score on demand | Done |
 | **M12** | One small VM per bot: systemd, secrets from Key Vault into memory, Tailscale, per-branch deploys | Done |
-| **M13** | Dashboard sections, starting with **Dates**: idea bank, planning, reminders, ratings (branch `feature/m13-dates`) | Not started |
-| **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Planned |
+| **M13** | Dashboard sections, starting with **Adventures**: idea bank, planning, reminders, ratings (branch `feature/m13-adventures`) | In progress |
+| **M14** | Fit the second bot's data pack and sources to its owner's field; move owner-specific bits into data | Blocked: waiting on you ([below](#waiting-on-you)) |
 | **M15** | MCP server as its own program, calling the bot's API (branch `feature/m15-mcp`) | Phase 1 done |
 | **M16** | Dev box: a VM on the tailnet with Tailscale SSH and the toolchains, no Azure rights ([dev-box.md](dev-box.md)) | Done |
 | **M17** | Repos on the dev box: synced from a list, pushes with one scoped, expiring GitHub token | Done |
-| **M18** | A **Code** page: each repo active or not, Continue Coding / New Session open a Remote Control session, waking the VM | In progress |
+| **M18** | A **Code** page: each repo active or not, Continue Coding / New Session open a Remote Control session, waking the VM | Done |
 | **M19** | More on the Code page: branch and changes per repo, stop a session, `/code` in Telegram, sleep when idle | Planned |
 | **M20** | The plan on the Code page: open a repo to read its roadmap, open milestones first | Planned |
 
@@ -43,7 +43,7 @@ amount instead of grants. Every posting that lists pay (most do, under pay-trans
 pay now on Options, Suggested and the posting page, and Options filters on it. Fit is now three parts: the model
 scores only the resume match, and code blends in location (by tier) and pay (against pay now), weighted in
 `preferences.yaml` (`fit:`); jobs sort by that fit instead of tier and category first. The owner's
-`comp/current.yaml` is in the data pack. **Next:** try it on a real offer, then maybe `/compare` in Telegram.
+`comp/current.yaml` is in the data pack. **Done** (merged in #4). Trying it on a real offer is on [your list](#waiting-on-you).
 
 **M11: A source with no public feed.** Its site's terms forbid automated access, so the feed is alert emails (its own,
 or from a third-party site that lists its items), forwarded to the dedicated mailbox. **Done:** those alerts dedupe by
@@ -51,14 +51,14 @@ the third-party site's own id, and every item and pursuit page links to that sit
 owner opens; nothing is fetched). **Built:** a company's own career-site alerts (apple.com) are read once its domain is
 listed under `senders:` on the watchlist's email entry. On the item page the owner pastes the full posting; it replaces
 the alert's snippet, takes the pay range from it, and the job is re-scored at once (a later copy of the alert never
-overwrites it). The "top picks" view was dropped: Options already sorts by fit. **Next:** merge, then paste a few.
+overwrites it). The "top picks" view was dropped: Options already sorts by fit. **Done** (merged in #5).
 
-**M13: Dates.** A section switcher in the dashboard (each bot turns sections on in config). Dates has these pages:
+**M13: Adventures.** A section switcher in the dashboard (each bot turns sections on in config). Adventures has these pages:
 Upcoming, Ideas (add, generate, favorite), Generate (constraints in, 5 ideas out, using past ratings) and History.
 Reminders go through Telegram: a cadence nudge, prep due dates, the day before and the day of, then a rating
 afterward. Before merging, it's tested with a separate test bot.
 
-**M14: Second bot's field.** Talk it through with that bot's owner, then rewrite their data pack (profile, preferences, sources) and
+**M14: Second bot's field.** **Blocked:** waiting on you (see [below](#waiting-on-you)). Talk it through with that bot's owner, then rewrite their data pack (profile, preferences, sources) and
 add sources that carry their kind of work (alert emails, documented public APIs). Also make the shared code
 neutral: search links and groups come from data, prompts use field-neutral wording, and per-bot settings move out of
 the shared config.
@@ -84,7 +84,7 @@ See [mcp.md](mcp.md).
   Continue Coding (`claude --continue`) and New Session (`claude`) open a tmux session with Remote Control on, so it
   shows up in the Claude app, any number at once. An agent on the dev box opens them, answering only the bot's tailnet
   machine; when the box is asleep, the bot starts the VM first (a custom role: read and start that one VM).
-  **Built** (`internal/devbox`, `deploy/dev/box/bin/dev-agent`); **next:** deploy and try it from the phone.
+  **Done:** deployed, and sessions open from the phone (this roadmap was updated from one).
 - **M19:** the page grows: branch, uncommitted changes and open PRs per repo, stopping a session, `/code` in
   Telegram, and letting the VM sleep after a few idle hours. The dev box stays separate from the bot VMs so coding
   sessions can never reach a bot's secrets.
@@ -94,3 +94,12 @@ See [mcp.md](mcp.md).
   to the dashboard. The page shows the open milestones first (not done, in progress, built but not merged) with their
   details, and the done ones folded away. A repo with no plan file just says so. While the dev box sleeps, the last
   copy the bot saw is shown with its date, rather than waking the VM just to read a file.
+
+## Waiting on you
+
+Things only you can do. Each one unblocks or finishes a milestone.
+
+- [ ] **M14:** talk through the second bot's owner's field with them (target roles, where they'd move, pay, which job
+  sites and alerts they use), then tell me. Until then their data pack and sources stay as they are.
+- [ ] **M9:** when a real offer comes in, paste it on the pursuit page and check the numbers it reads.
+- [ ] **M11:** paste a few full postings on alert-email jobs and see whether the new scores feel right.
