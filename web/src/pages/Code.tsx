@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, type CodeRepo, type DevBoxState } from "../api";
-import { Badge, ErrorNote, Panel } from "../components";
+import { Badge, ErrorNote, External, Panel } from "../components";
 import { dateTime } from "../format";
 import { useAction, useLoad } from "../hooks";
 
@@ -58,6 +58,32 @@ export function Code() {
   );
 }
 
+/** Branch, uncommitted changes, commits to push or pull, the last commit, and open PRs. */
+function RepoFacts({ repo }: { repo: CodeRepo }) {
+  const facts = [repo.branch];
+  if (repo.changes > 0) facts.push(`${repo.changes} changed`);
+  if (repo.ahead) facts.push(`↑${repo.ahead} to push`);
+  if (repo.behind) facts.push(`↓${repo.behind} behind`);
+  return (
+    <>
+      <span className="repo-note muted">
+        {facts.join(" · ")}
+        {repo.lastCommit && ` · last commit ${dateTime(repo.lastCommit.at)}: ${repo.lastCommit.subject}`}
+      </span>
+      {repo.prs && repo.prs.length > 0 && (
+        <span className="repo-note row wrap">
+          {repo.prs.map((p) => (
+            <External key={p.number} href={p.url}>
+              #{p.number} {p.title}
+              {p.draft && " (draft)"}
+            </External>
+          ))}
+        </span>
+      )}
+    </>
+  );
+}
+
 function RepoRow({ repo, onChange }: { repo: CodeRepo; onChange: () => void }) {
   const { run, busy, error } = useAction();
   const [note, setNote] = useState("");
@@ -86,9 +112,26 @@ function RepoRow({ repo, onChange }: { repo: CodeRepo; onChange: () => void }) {
           New Session
         </button>
       </span>
-      {active && (
-        <span className="repo-note muted">{repo.sessions.map((s) => `${s.name} (since ${dateTime(s.startedAt)})`).join(" · ")}</span>
-      )}
+      {repo.known && <RepoFacts repo={repo} />}
+      {repo.sessions.map((s) => (
+        <span key={s.name} className="repo-note row">
+          <span className="muted">
+            {s.name} (since {dateTime(s.startedAt)})
+          </span>
+          <button
+            className="btn small ghost"
+            disabled={busy}
+            onClick={async () => {
+              if (confirm(`Stop ${s.name}? Its conversation is kept for the next Continue Coding.`) && (await run(() => api.stopCodeSession(s.name)))) {
+                setNote(`Stopped ${s.name}.`);
+                onChange();
+              }
+            }}
+          >
+            Stop
+          </button>
+        </span>
+      ))}
       {repo.waiting && !repo.error && (
         <span className="repo-note muted">Waiting for the dev box, then {repo.waiting === "new" ? "a new session" : "continuing"}…</span>
       )}

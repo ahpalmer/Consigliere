@@ -1,17 +1,22 @@
 #!/usr/bin/python3 -I
 """The dev box's agent (docs/dev-box.md). The owner's bot asks it, over the tailnet, which repos have a Claude Code
-session open, and starts new ones for the dashboard's Code page. dev-agent.service runs it as dev.
+session open, starts and stops them for the dashboard's Code page, and asks whether the box is idle enough to sleep.
+dev-agent.service runs it as dev.
 
-  GET  /sessions                          the open sessions
-  POST /sessions {"repo": .., "mode": ..}  start one: mode "continue" (the repo's last conversation) or "new"
+  GET    /sessions                          the open sessions
+  POST   /sessions {"repo": .., "mode": ..}  start one: mode "continue" (the repo's last conversation) or "new"
+  DELETE /sessions/<name>                   stop one (its conversation stays on disk for the next Continue)
+  GET    /repos                             each repo's branch, uncommitted changes, ahead/behind, last commit, open PRs
+  GET    /activity                          since when nothing has happened: no session output, no one logged in
 
 A session is a tmux session named <repo>-<n> running dev-session, so it ends when Claude does, and over SSH
 `tmux attach -t <name>` shows the same terminal. Only tailnet machines tagged ALLOWED_TAG (the bot's) may ask, checked
-with `tailscale whois`, and the agent never runs anything but tmux and dev-session.
+with `tailscale whois`. The agent runs tmux and dev-session, and git and gh only to read.
 """
 import itertools
 import json
 import os
+from concurrent.futures import ThreadPoolExecutor
 import re
 import subprocess
 import sys
@@ -27,10 +32,16 @@ NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 MODES = ("continue", "new")
 starting = threading.Lock()  # one start at a time, so two can't pick the same name
 callers = {}  # client IP -> (checked until, allowed)
+PR_TTL = 300  # open PRs come from GitHub, so they're kept for 5 minutes
+prs_cache = {}  # repo -> (fetched at, PRs)
+last_activity = time.time()  # the agent starting counts: the box just booted
 
 
-def run(*args, timeout=10):
-    return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+def run(*args, timeout=10, cwd=None):
+    try:
+        return subprocess.run(args, capture_output=True, text=True, timeout=timeout, cwd=cwd)
+    except subprocess.TimeoutExpired:
+        return subprocess.CompletedProcess(args, 124, "", "timed out")
 
 
 def repos():
@@ -71,6 +82,73 @@ def start(repo, mode):
     return 201, {"name": name, "repo": repo}
 
 
+def stop(name):
+    """Returns (HTTP status, reply)."""
+    if name not in {s["name"] for s in sessions()}:
+        return 404, {"error": f"no session {name}"}
+    out = run("tmux", "kill-session", "-t", f"={name}")
+    if out.returncode != 0:
+        return 500, {"error": f"tmux: {out.stderr.strip()}"}
+    return 200, {"stopped": name}
+
+
+def git(repo, *args):
+    out = run("git", "-C", os.path.join(SRC, repo), *args)
+    return out.stdout.strip() if out.returncode == 0 else ""
+
+
+def open_prs(repo):
+    cached = prs_cache.get(repo)
+    if cached and cached[0] > time.monotonic() - PR_TTL:
+        return cached[1]
+    out = run("gh", "pr", "list", "--state", "open", "--json", "number,title,url,headRefName,isDraft", "--limit", "20",
+              cwd=os.path.join(SRC, repo), timeout=20)
+    prs = []
+    if out.returncode == 0:
+        try:
+            prs = [{"number": p["number"], "title": p["title"], "url": p["url"], "branch": p["headRefName"],
+                    "draft": p.get("isDraft", False)} for p in json.loads(out.stdout)]
+        except (ValueError, KeyError, TypeError):
+            prs = None
+    else:
+        prs = None  # unknown, not none: GitHub didn't answer
+    prs_cache[repo] = (time.monotonic(), prs)
+    return prs
+
+
+def repo_state(repo):
+    branch = git(repo, "branch", "--show-current") or "(detached)"
+    changes = len([line for line in git(repo, "status", "--porcelain").splitlines() if line.strip()])
+    ahead = behind = None
+    counts = git(repo, "rev-list", "--left-right", "--count", "@{upstream}...HEAD").split()
+    if len(counts) == 2:
+        behind, ahead = int(counts[0]), int(counts[1])
+    subject, _, at = git(repo, "log", "-1", "--format=%s%x00%cI").partition("\0")
+    return {"name": repo, "branch": branch, "changes": changes, "ahead": ahead, "behind": behind,
+            "lastCommit": {"subject": subject, "at": at} if subject else None, "prs": open_prs(repo)}
+
+
+def repo_states():
+    with ThreadPoolExecutor(max_workers=6) as pool:
+        return sorted(pool.map(repo_state, repos()), key=lambda r: r["name"].lower())
+
+
+def activity():
+    """The box is busy while a session prints something or someone is logged in; idleSince is when that last was."""
+    global last_activity
+    now = time.time()
+    out = run("tmux", "list-sessions", "-F", "#{session_activity}")
+    if out.returncode == 0:
+        for line in out.stdout.split():
+            if line.isdigit():
+                last_activity = max(last_activity, int(line))
+    logins = len([line for line in run("who").stdout.splitlines() if line.strip()])
+    if logins:
+        last_activity = now
+    since = datetime.fromtimestamp(last_activity, timezone.utc).isoformat().replace("+00:00", "Z")
+    return {"idleSince": since, "sessions": len(sessions()), "logins": logins}
+
+
 def allowed(ip):
     checked = callers.get(ip)
     if checked and checked[0] > time.monotonic():
@@ -92,9 +170,21 @@ class Handler(BaseHTTPRequestHandler):
     def do_GET(self):
         if not self.caller_allowed():
             return
-        if self.path != "/sessions":
+        if self.path == "/sessions":
+            return self.reply(200, {"sessions": sessions()})
+        if self.path == "/repos":
+            return self.reply(200, {"repos": repo_states()})
+        if self.path == "/activity":
+            return self.reply(200, activity())
+        self.reply(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        if not self.caller_allowed():
+            return
+        name = self.path.removeprefix("/sessions/")
+        if name == self.path or not NAME.match(name):
             return self.reply(404, {"error": "not found"})
-        self.reply(200, {"sessions": sessions()})
+        self.reply(*stop(name))
 
     def do_POST(self):
         if not self.caller_allowed():

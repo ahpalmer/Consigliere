@@ -217,13 +217,14 @@ resource ownerSecrets 'Microsoft.Authorization/roleAssignments@2022-04-01' = {
   }
 }
 
-// The owner's bot may see whether this VM is running and start it (the dashboard's Code page), and nothing more: not
-// stop or change it, and not run commands on it (run-command would be root on the box, and so the GitHub token).
+// The owner's bot may see whether this VM is running, start it (the dashboard's Code page), and put it to sleep
+// (deallocate) once it's been idle for a few hours, and nothing more: not change it, and not run commands on it
+// (run-command would be root on the box, and so the GitHub token).
 resource vmStarter 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
   name: guid(resourceGroup().id, 'vm-starter')
   properties: {
     roleName: 'Consigliere dev box starter (${resourceGroup().name})'
-    description: 'Read the dev box VM and its power state, and start it.'
+    description: 'Read the dev box VM and its power state, start it, and deallocate it.'
     type: 'CustomRole'
     permissions: [
       {
@@ -231,6 +232,7 @@ resource vmStarter 'Microsoft.Authorization/roleDefinitions@2022-04-01' = {
           'Microsoft.Compute/virtualMachines/read'
           'Microsoft.Compute/virtualMachines/instanceView/read'
           'Microsoft.Compute/virtualMachines/start/action'
+          'Microsoft.Compute/virtualMachines/deallocate/action'
         ]
         notActions: []
       }
