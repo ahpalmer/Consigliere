@@ -8,6 +8,7 @@ dev-agent.service runs it as dev.
   DELETE /sessions/<name>                   stop one (its conversation stays on disk for the next Continue)
   GET    /repos                             each repo's branch, uncommitted changes, ahead/behind, last commit, open PRs
   GET    /activity                          since when nothing has happened: no session output, no one logged in
+  GET    /plan/<repo>?path=docs/roadmap.md  the repo's plan file on its default branch, and where open branches differ
 
 A session is a tmux session named <repo>-<n> running dev-session, so it ends when Claude does, and over SSH
 `tmux attach -t <name>` shows the same terminal. Only tailnet machines tagged ALLOWED_TAG (the bot's) may ask, checked
@@ -24,6 +25,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs
 
 PORT = 8790
 ALLOWED_TAG = "tag:consigliere"
@@ -149,6 +151,43 @@ def activity():
     return {"idleSince": since, "sessions": len(sessions()), "logins": logins}
 
 
+PLAN_PATH = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._/-]*\.md$")
+PLAN_MAX = 256 * 1024
+
+
+def show(repo, ref, path):
+    out = run("git", "-C", os.path.join(SRC, repo), "show", f"{ref}:{path}")
+    return out.stdout[:PLAN_MAX] if out.returncode == 0 else None
+
+
+def plan(repo, path):
+    """Returns (HTTP status, reply): the plan file as of the last fetch, on the default branch and on open branches
+    where it's different (branches with an open PR, or recent unmerged ones when GitHub doesn't answer)."""
+    if repo not in repos():
+        return 404, {"error": f"no repo {repo} in ~/src"}
+    if not PLAN_PATH.match(path) or ".." in path.split("/"):
+        return 400, {"error": "the plan must be a .md file inside the repo"}
+    default = git(repo, "symbolic-ref", "--short", "refs/remotes/origin/HEAD") or "origin/main"
+    base = default.removeprefix("origin/")
+    text = show(repo, default, path)
+    fetched = os.path.join(SRC, repo, ".git", "FETCH_HEAD")
+    as_of = datetime.fromtimestamp(os.path.getmtime(fetched), timezone.utc).isoformat().replace("+00:00", "Z") if os.path.exists(fetched) else None
+    reply = {"path": path, "branch": base, "text": text, "asOf": as_of, "branches": []}
+    if text is None:
+        return 200, reply
+    prs = open_prs(repo)
+    if prs is not None:
+        candidates = [p["branch"] for p in prs]
+    else:
+        unmerged = git(repo, "branch", "-r", "--no-merged", default, "--sort=-committerdate", "--format=%(refname:short)")
+        candidates = [b.removeprefix("origin/") for b in unmerged.splitlines() if b.startswith("origin/") and b != "origin/HEAD"]
+    for branch in list(dict.fromkeys(candidates))[:10]:
+        other = show(repo, "origin/" + branch, path)
+        if other is not None and other != text:
+            reply["branches"].append({"branch": branch, "text": other})
+    return 200, reply
+
+
 def allowed(ip):
     checked = callers.get(ip)
     if checked and checked[0] > time.monotonic():
@@ -176,6 +215,13 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(200, {"repos": repo_states()})
         if self.path == "/activity":
             return self.reply(200, activity())
+        route, _, query = self.path.partition("?")
+        if route.startswith("/plan/"):
+            repo = route.removeprefix("/plan/")
+            path = parse_qs(query).get("path", ["docs/roadmap.md"])[0]
+            if not NAME.match(repo):
+                return self.reply(404, {"error": "not found"})
+            return self.reply(*plan(repo, path))
         self.reply(404, {"error": "not found"})
 
     def do_DELETE(self):

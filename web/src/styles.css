@@ -1434,3 +1434,25 @@ textarea.mono {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* --- the plan on the Code page (M20) --- */
+
+.milestone {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.milestone h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.milestone p {
+  margin: 0;
+}
+
+details.panel summary {
+  cursor: pointer;
+  font-weight: 600;
+}

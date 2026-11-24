@@ -175,7 +175,7 @@ func run(ctx context.Context, configPath, secretsPath string) error {
 	}
 
 	// The Code page's dev box (M18, M19): also /code in Telegram, and putting the box to sleep when it's idle.
-	codeBox := &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv()}
+	codeBox := &devbox.Box{Pack: pack, Tokens: azure.ManagedIdentityFromEnv(), DB: db, Clock: clk}
 	// Adventures (M13): its job and buttons do nothing for a bot whose data pack doesn't turn the section on.
 	adventureStore := &adventures.Store{DB: db, Clock: clk, Location: location}
 

@@ -236,6 +236,27 @@ export interface CodeRepo {
   prs: { number: number; title: string; url: string; branch: string; draft: boolean }[] | null;
 }
 
+/** A repo's plan (M20), read by the dev box; stale while it sleeps. */
+export interface CodePlan {
+  repo: string;
+  path: string;
+  branch: string;
+  asOf: string | null;
+  readAt: string;
+  stale: boolean;
+  found: boolean;
+  milestones: {
+    id: string;
+    title: string;
+    status: string;
+    open: boolean;
+    details: string;
+    onBranches: { branch: string; status: string; new: boolean }[];
+  }[];
+  text: string;
+  branches: string[];
+}
+
 export type DevBoxState = "running" | "booting" | "starting" | "asleep" | "stopping" | "deallocating" | "unknown";
 
 export interface CodeStatus {
@@ -449,5 +470,6 @@ export const api = {
   code: () => get<CodeStatus>("/api/code"),
   startCodeSession: (repo: string, mode: "continue" | "new") =>
     send<{ session: string; waking: boolean }>("POST", `/api/code/repos/${encodeURIComponent(repo)}/sessions`, { mode }),
+  codePlan: (repo: string) => get<CodePlan>(`/api/code/repos/${encodeURIComponent(repo)}/plan`),
   stopCodeSession: (name: string) => send<{ stopped: boolean }>("DELETE", `/api/code/sessions/${encodeURIComponent(name)}`),
 };

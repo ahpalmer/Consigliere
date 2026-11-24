@@ -83,6 +83,7 @@ func (s *Server) routes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/code", s.codeStatus)
 	mux.HandleFunc("POST /api/code/repos/{repo}/sessions", s.startCodeSession)
 	mux.HandleFunc("DELETE /api/code/sessions/{name}", s.stopCodeSession)
+	mux.HandleFunc("GET /api/code/repos/{repo}/plan", s.codePlan)
 }
 
 // --- JSON shapes ---

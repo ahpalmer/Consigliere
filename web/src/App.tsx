@@ -5,6 +5,7 @@ import { SessionContext } from "./session";
 import { AdventureGenerate, AdventureHistory, AdventureIdeas, AdventuresUpcoming } from "./pages/Adventures";
 import { Board } from "./pages/Board";
 import { Code } from "./pages/Code";
+import { CodePlan } from "./pages/CodePlan";
 import { ItemPage } from "./pages/ItemPage";
 import { Login } from "./pages/Login";
 import { Options } from "./pages/Options";
@@ -120,6 +121,7 @@ export function App() {
           <Route path="/items/:id" element={<ItemPage />} />
           <Route path="/status" element={<StatusPage />} />
           {code && <Route path="/code" element={<Code />} />}
+          {code && <Route path="/code/:repo/plan" element={<CodePlan />} />}
           {adventures && (
             <>
               <Route path="/adventures" element={<AdventuresUpcoming />} />

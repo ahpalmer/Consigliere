@@ -77,3 +77,25 @@ func (s *Server) stopCodeSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "The dev box doesn't answer: "+err.Error())
 	}
 }
+
+// codePlan is a repo's plan (M20): read from the dev box, or the last copy while it sleeps.
+func (s *Server) codePlan(w http.ResponseWriter, r *http.Request) {
+	if !s.codeEnabled() {
+		writeError(w, http.StatusNotFound, "no dev box set up")
+		return
+	}
+	p, err := s.Code.Plan(r.Context(), r.PathValue("repo"))
+	var refused *devbox.AgentError
+	switch {
+	case err == nil:
+		writeJSON(w, http.StatusOK, p)
+	case errors.Is(err, devbox.ErrUnknownRepo):
+		writeError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, devbox.ErrNoPlanYet):
+		writeError(w, http.StatusConflict, "The dev box is asleep and hasn't sent this plan yet. Open a session to wake it, then look again.")
+	case errors.As(err, &refused):
+		writeError(w, http.StatusBadGateway, "The dev box answered: "+refused.Message)
+	default:
+		serverError(w, err)
+	}
+}
