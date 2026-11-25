@@ -1,0 +1,38 @@
+# The MCP server over streamable HTTP (M15 phase 4), next to the agent. It holds no secret and never opens the
+# database: callers send the dashboard token, which it checks with the dashboard on loopback and passes through.
+# `tailscale serve` publishes it on the tailnet at https://<bot>.<tailnet>.ts.net:8443/mcp. Installed by install.sh.
+[Unit]
+Description=Consigliere MCP server
+Wants=network-online.target
+After=network-online.target consigliere.service
+
+[Service]
+DynamicUser=yes
+ExecStart=/opt/consigliere/current/consigliere mcp-http 127.0.0.1:8091 http://127.0.0.1:8080
+Restart=always
+RestartSec=5
+MemoryMax=200M
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+
+[Install]
+WantedBy=multi-user.target
