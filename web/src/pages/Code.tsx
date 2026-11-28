@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, type CodeRepo, type DevBoxState } from "../api";
 import { Badge, ErrorNote, External, Panel } from "../components";
 import { dateTime } from "../format";
@@ -103,7 +104,12 @@ function RepoRow({ repo, onChange }: { repo: CodeRepo; onChange: () => void }) {
   return (
     <li>
       <Badge tone={active ? "good" : "bad"}>● {active ? "Active" : "Inactive"}</Badge>
-      <span className="repo-name">{repo.name}</span>
+      <span className="repo-name">
+        {repo.name}{" "}
+        <Link className="small" to={`/code/${encodeURIComponent(repo.name)}/plan`}>
+          Plan
+        </Link>
+      </span>
       <span className="row">
         <button className="btn small primary" disabled={busy || !!(repo.waiting && !repo.error)} onClick={() => void start("continue")}>
           Continue Coding
